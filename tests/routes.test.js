@@ -53,3 +53,42 @@ describe('POST /auth/login', () => {
     expect(res.status).toBe(401)
   })
 })
+
+const jwt = require('jsonwebtoken')
+
+function makeToken() {
+  return jwt.sign({ sub: 'user-1', email: 'a@b.com' }, process.env.JWT_SECRET)
+}
+
+describe('POST /chat/stream', () => {
+  it('returns 401 without token', async () => {
+    const res = await request(app).post('/chat/stream').send({ messages: [] })
+    expect(res.status).toBe(401)
+  })
+
+  it('returns 400 when messages missing', async () => {
+    const res = await request(app)
+      .post('/chat/stream')
+      .set('Authorization', `Bearer ${makeToken()}`)
+      .send({})
+    expect(res.status).toBe(400)
+  })
+})
+
+describe('POST /chat/summarize', () => {
+  it('returns 401 without token', async () => {
+    const res = await request(app).post('/chat/summarize').send({ messages: [] })
+    expect(res.status).toBe(401)
+  })
+
+  it('returns summary for valid request', async () => {
+    const anthropic = require('../src/anthropic')
+    anthropic.summarize.mockResolvedValueOnce('A summary.')
+    const res = await request(app)
+      .post('/chat/summarize')
+      .set('Authorization', `Bearer ${makeToken()}`)
+      .send({ messages: [{ role: 'user', content: 'hi' }] })
+    expect(res.status).toBe(200)
+    expect(res.body.summary).toBe('A summary.')
+  })
+})
