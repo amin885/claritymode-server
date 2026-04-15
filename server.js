@@ -11,7 +11,8 @@ app.use('/chat', chatRoutes)
 if (require.main === module) {
   const PORT = process.env.PORT || 3000
   const db = require('./src/db')
-  console.log('DATABASE_URL set:', !!process.env.DATABASE_URL, process.env.DATABASE_URL?.slice(0, 20))
+  const connString = process.env.POSTGRES_URL || process.env.DATABASE_URL
+  console.log('DB connection string set:', !!connString, connString?.slice(0, 20))
   db.query(`
     CREATE TABLE IF NOT EXISTS users (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
