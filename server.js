@@ -20,7 +20,7 @@ if (require.main === module) {
     )
   `)
     .then(() => console.log('Database ready.'))
-    .catch(err => console.error('Migration warning:', err.message))
+    .catch(err => console.error('Migration warning:', JSON.stringify(err), err.message, err.code))
     .finally(() => {
       app.listen(PORT, () => console.log(`ClarityMode server running on ${PORT}`))
     })
