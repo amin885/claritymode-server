@@ -19,13 +19,10 @@ if (require.main === module) {
       created_at TIMESTAMPTZ DEFAULT now()
     )
   `)
-    .then(() => {
-      console.log('Database ready.')
+    .then(() => console.log('Database ready.'))
+    .catch(err => console.error('Migration warning:', err.message))
+    .finally(() => {
       app.listen(PORT, () => console.log(`ClarityMode server running on ${PORT}`))
-    })
-    .catch(err => {
-      console.error('Database migration failed:', err)
-      process.exit(1)
     })
 }
 
