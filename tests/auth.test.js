@@ -5,6 +5,8 @@ const { signup, login, verifyToken } = require('../src/auth')
 process.env.JWT_SECRET = 'test-secret-for-jest-only'
 
 describe('signup', () => {
+  beforeEach(() => db.query.mockClear())
+
   it('returns a JWT token', async () => {
     db.query.mockResolvedValueOnce({ rows: [{ id: 'uuid-1', email: 'a@b.com' }] })
     const result = await signup('a@b.com', 'password123')
