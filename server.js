@@ -5,6 +5,15 @@ const chatRoutes = require('./src/routes/chat')
 
 const app = express()
 app.use(express.json())
+app.get('/debug-env', (req, res) => {
+  res.json({
+    PORT: process.env.PORT,
+    NODE_ENV: process.env.NODE_ENV,
+    HAS_POSTGRES_URL: !!process.env.POSTGRES_URL,
+    HAS_DATABASE_URL: !!process.env.DATABASE_URL,
+    ALL_KEYS: Object.keys(process.env).sort(),
+  })
+})
 app.use('/auth', authRoutes)
 app.use('/chat', chatRoutes)
 
