@@ -29,4 +29,10 @@ describe('requireAuth', () => {
     expect(res.status).toBe(200)
     expect(res.body.user.email).toBe('a@b.com')
   })
+
+  it('rejects requests with an expired token', async () => {
+    const expiredToken = jwt.sign({ sub: 'id-1', email: 'a@b.com' }, process.env.JWT_SECRET, { expiresIn: 0 })
+    const res = await request(app).get('/protected').set('Authorization', `Bearer ${expiredToken}`)
+    expect(res.status).toBe(401)
+  })
 })
