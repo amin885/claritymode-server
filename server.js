@@ -10,7 +10,23 @@ app.use('/chat', chatRoutes)
 
 if (require.main === module) {
   const PORT = process.env.PORT || 3000
-  app.listen(PORT, () => console.log(`ClarityMode server running on ${PORT}`))
+  const db = require('./src/db')
+  db.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      email TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT now()
+    )
+  `)
+    .then(() => {
+      console.log('Database ready.')
+      app.listen(PORT, () => console.log(`ClarityMode server running on ${PORT}`))
+    })
+    .catch(err => {
+      console.error('Database migration failed:', err)
+      process.exit(1)
+    })
 }
 
 module.exports = app
