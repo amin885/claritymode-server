@@ -11,6 +11,7 @@ router.post('/signup', async (req, res) => {
     const result = await signup(email, password)
     res.json(result)
   } catch (err) {
+    console.error('Signup error:', err.message, err.code, err.constructor?.name)
     if (err.code === '23505') return res.status(409).json({ error: 'Email already in use' })
     res.status(500).json({ error: 'Signup failed' })
   }
