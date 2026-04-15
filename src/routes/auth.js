@@ -23,7 +23,7 @@ router.post('/login', async (req, res) => {
     const result = await login(email, password)
     res.json(result)
   } catch (err) {
-    res.status(err.status || 500).json({ error: err.message })
+    res.status(err.status || 500).json({ error: err.status ? err.message : 'Login failed' })
   }
 })
 

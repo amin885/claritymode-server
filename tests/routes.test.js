@@ -28,6 +28,7 @@ describe('POST /auth/signup', () => {
     db.query.mockRejectedValueOnce({ code: '23505' })
     const res = await request(app).post('/auth/signup').send({ email: 'a@b.com', password: 'password123' })
     expect(res.status).toBe(409)
+    expect(res.body.error).toBe('Email already in use')
   })
 })
 
