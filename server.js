@@ -27,9 +27,11 @@ if (require.main === module) {
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       email TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
+      is_approved BOOLEAN NOT NULL DEFAULT false,
       created_at TIMESTAMPTZ DEFAULT now()
     )
   `)
+    .then(() => db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_approved BOOLEAN NOT NULL DEFAULT false`))
     .then(() => console.log('Database ready.'))
     .catch(err => console.error('Migration warning:', JSON.stringify(err), err.message, err.code))
     .finally(() => {
