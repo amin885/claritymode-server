@@ -40,7 +40,7 @@ async function streamToResponse(res, { systemPrompt, messages, tools }) {
       }
     }
 
-    send({ type: 'done', stopReason: final.stop_reason, content: final.content })
+    send({ type: 'done', stopReason: final.stop_reason, content: final.content, usage: final.usage })
   } catch (err) {
     send({ type: 'error', message: err.message || 'Anthropic error' })
   } finally {
