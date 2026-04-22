@@ -19,7 +19,7 @@ async function streamToResponse(res, { systemPrompt, messages, tools }) {
     const stream = await getClient().messages.stream({
       model: MODEL,
       max_tokens: 2048,
-      system: systemPrompt || '',
+      system: systemPrompt ? [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }] : [],
       tools: tools || [],
       messages,
     })
