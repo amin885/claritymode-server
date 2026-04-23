@@ -16,11 +16,16 @@ async function streamToResponse(res, { systemPrompt, messages, tools }) {
   }
 
   try {
+    const rawTools = tools || []
+    const cachedTools = rawTools.length > 0
+      ? rawTools.map((t, i) => i === rawTools.length - 1 ? { ...t, cache_control: { type: 'ephemeral' } } : t)
+      : rawTools
+
     const stream = await getClient().messages.stream({
       model: MODEL,
-      max_tokens: 2048,
+      max_tokens: 8192,
       system: systemPrompt ? [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }] : [],
-      tools: tools || [],
+      tools: cachedTools,
       messages,
     })
 
