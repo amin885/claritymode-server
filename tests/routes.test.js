@@ -42,6 +42,43 @@ function makeToken() {
   return jwt.sign({ sub: 'user-1', email: 'a@b.com' }, process.env.JWT_SECRET)
 }
 
+describe('POST /auth/change-password', () => {
+  it('returns 401 without token', async () => {
+    const res = await request(app).post('/auth/change-password').send({ currentPassword: 'old', newPassword: 'new' })
+    expect(res.status).toBe(401)
+  })
+
+  it('returns 400 when fields missing', async () => {
+    const res = await request(app)
+      .post('/auth/change-password')
+      .set('Authorization', `Bearer ${makeToken()}`)
+      .send({ currentPassword: 'old' })
+    expect(res.status).toBe(400)
+  })
+
+  it('returns 401 for wrong current password', async () => {
+    const hash = await bcrypt.hash('correct1', 1)
+    db.query.mockResolvedValueOnce({ rows: [{ id: 'uuid-cp1', password_hash: hash }] })
+    const res = await request(app)
+      .post('/auth/change-password')
+      .set('Authorization', `Bearer ${makeToken()}`)
+      .send({ currentPassword: 'wrong123', newPassword: 'newpass1' })
+    expect(res.status).toBe(401)
+  })
+
+  it('returns ok for valid change', async () => {
+    const hash = await bcrypt.hash('oldpass1', 1)
+    db.query.mockResolvedValueOnce({ rows: [{ id: 'uuid-cp2', password_hash: hash }] })
+    db.query.mockResolvedValueOnce({ rows: [] })
+    const res = await request(app)
+      .post('/auth/change-password')
+      .set('Authorization', `Bearer ${makeToken()}`)
+      .send({ currentPassword: 'oldpass1', newPassword: 'newpass1' })
+    expect(res.status).toBe(200)
+    expect(res.body.ok).toBe(true)
+  })
+})
+
 describe('POST /chat/stream', () => {
   it('returns 401 without token', async () => {
     const res = await request(app).post('/chat/stream').send({ messages: [] })

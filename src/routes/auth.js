@@ -1,5 +1,6 @@
 const express = require('express')
-const { createUser, login } = require('../auth')
+const { createUser, login, changePassword } = require('../auth')
+const requireAuth = require('../middleware/requireAuth')
 
 const router = express.Router()
 
@@ -16,6 +17,17 @@ router.post('/login', async (req, res) => {
     res.json(result)
   } catch (err) {
     res.status(err.status || 500).json({ error: err.status ? err.message : 'Login failed' })
+  }
+})
+
+router.post('/change-password', requireAuth, async (req, res) => {
+  const { currentPassword, newPassword } = req.body
+  if (!currentPassword || !newPassword) return res.status(400).json({ error: 'currentPassword and newPassword required' })
+  try {
+    await changePassword(req.user.email, currentPassword, newPassword)
+    res.json({ ok: true })
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.status ? err.message : 'Failed to change password' })
   }
 })
 
