@@ -58,6 +58,33 @@ describe('GET /auth/admin/users', () => {
   })
 })
 
+describe('PATCH /auth/admin/users/:email/approved', () => {
+  it('returns 401 without admin secret', async () => {
+    const res = await request(app).patch('/auth/admin/users/a@b.com/approved').send({ approved: true })
+    expect(res.status).toBe(401)
+  })
+
+  it('approves a user', async () => {
+    process.env.ADMIN_SECRET = 'test-secret'
+    db.query.mockResolvedValueOnce({ rows: [{ email: 'a@b.com', is_approved: true }] })
+    const res = await request(app)
+      .patch('/auth/admin/users/a@b.com/approved')
+      .set('x-admin-secret', 'test-secret')
+      .send({ approved: true })
+    expect(res.status).toBe(200)
+    expect(res.body.isApproved).toBe(true)
+  })
+
+  it('returns 400 for non-boolean approved value', async () => {
+    process.env.ADMIN_SECRET = 'test-secret'
+    const res = await request(app)
+      .patch('/auth/admin/users/a@b.com/approved')
+      .set('x-admin-secret', 'test-secret')
+      .send({ approved: 'yes' })
+    expect(res.status).toBe(400)
+  })
+})
+
 describe('POST /auth/admin/reset-password', () => {
   it('returns 401 without admin secret', async () => {
     const res = await request(app).post('/auth/admin/reset-password').send({ email: 'a@b.com', password: 'newpass123' })

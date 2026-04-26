@@ -85,6 +85,27 @@ router.get('/admin/users', async (req, res) => {
   }
 })
 
+// Admin-only: set is_approved for a user
+router.patch('/admin/users/:email/approved', async (req, res) => {
+  const secret = req.headers['x-admin-secret']
+  if (!secret || secret !== process.env.ADMIN_SECRET) {
+    return res.status(401).json({ error: 'Unauthorized' })
+  }
+  const { approved } = req.body
+  if (typeof approved !== 'boolean') return res.status(400).json({ error: 'approved must be a boolean' })
+  const db = require('../db')
+  try {
+    const result = await db.query(
+      'UPDATE users SET is_approved = $1 WHERE email = $2 RETURNING email, is_approved',
+      [approved, req.params.email.toLowerCase().trim()]
+    )
+    if (!result.rows[0]) return res.status(404).json({ error: 'User not found' })
+    res.json({ ok: true, email: result.rows[0].email, isApproved: result.rows[0].is_approved })
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update user' })
+  }
+})
+
 // Admin-only: set enabled packs for a user
 router.patch('/admin/users/:email/packs', async (req, res) => {
   const secret = req.headers['x-admin-secret']
