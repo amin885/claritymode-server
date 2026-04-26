@@ -7,28 +7,9 @@ const app = require('../server')
 const bcrypt = require('bcryptjs')
 
 describe('POST /auth/signup', () => {
-  it('returns 400 when fields missing', async () => {
-    const res = await request(app).post('/auth/signup').send({ email: 'a@b.com' })
-    expect(res.status).toBe(400)
-  })
-
-  it('returns 400 when password under 8 chars', async () => {
-    const res = await request(app).post('/auth/signup').send({ email: 'a@b.com', password: 'short' })
-    expect(res.status).toBe(400)
-  })
-
-  it('returns token on success', async () => {
-    db.query.mockResolvedValueOnce({ rows: [{ id: 'uuid-1', email: 'a@b.com' }] })
+  it('returns 403 — signup is disabled', async () => {
     const res = await request(app).post('/auth/signup').send({ email: 'a@b.com', password: 'password123' })
-    expect(res.status).toBe(200)
-    expect(res.body.token).toBeDefined()
-  })
-
-  it('returns 409 when email already exists', async () => {
-    db.query.mockRejectedValueOnce({ code: '23505' })
-    const res = await request(app).post('/auth/signup').send({ email: 'a@b.com', password: 'password123' })
-    expect(res.status).toBe(409)
-    expect(res.body.error).toBe('Email already in use')
+    expect(res.status).toBe(403)
   })
 })
 
@@ -38,17 +19,18 @@ describe('POST /auth/login', () => {
     expect(res.status).toBe(400)
   })
 
-  it('returns token for valid credentials', async () => {
+  it('returns token and enabledPacks for valid credentials', async () => {
     const hash = await bcrypt.hash('password123', 1)
-    db.query.mockResolvedValueOnce({ rows: [{ id: 'uuid-2', email: 'a@b.com', password_hash: hash }] })
+    db.query.mockResolvedValueOnce({ rows: [{ id: 'uuid-2', email: 'a@b.com', password_hash: hash, is_approved: true, enabled_packs: ['podcast'] }] })
     const res = await request(app).post('/auth/login').send({ email: 'a@b.com', password: 'password123' })
     expect(res.status).toBe(200)
     expect(res.body.token).toBeDefined()
+    expect(res.body.enabledPacks).toEqual(['podcast'])
   })
 
   it('returns 401 for wrong password', async () => {
     const hash = await bcrypt.hash('correct', 1)
-    db.query.mockResolvedValueOnce({ rows: [{ id: 'uuid-3', email: 'a@b.com', password_hash: hash }] })
+    db.query.mockResolvedValueOnce({ rows: [{ id: 'uuid-3', email: 'a@b.com', password_hash: hash, is_approved: true, enabled_packs: [] }] })
     const res = await request(app).post('/auth/login').send({ email: 'a@b.com', password: 'wrong' })
     expect(res.status).toBe(401)
   })

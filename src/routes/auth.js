@@ -38,4 +38,25 @@ router.post('/admin/create-user', async (req, res) => {
   }
 })
 
+// Admin-only: set enabled packs for a user
+router.patch('/admin/users/:email/packs', async (req, res) => {
+  const secret = req.headers['x-admin-secret']
+  if (!secret || secret !== process.env.ADMIN_SECRET) {
+    return res.status(401).json({ error: 'Unauthorized' })
+  }
+  const { packs } = req.body
+  if (!Array.isArray(packs)) return res.status(400).json({ error: 'packs must be an array' })
+  const db = require('../db')
+  try {
+    const result = await db.query(
+      'UPDATE users SET enabled_packs = $1 WHERE email = $2 RETURNING email, enabled_packs',
+      [packs, req.params.email.toLowerCase().trim()]
+    )
+    if (!result.rows[0]) return res.status(404).json({ error: 'User not found' })
+    res.json({ ok: true, email: result.rows[0].email, enabledPacks: result.rows[0].enabled_packs })
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update packs' })
+  }
+})
+
 module.exports = router

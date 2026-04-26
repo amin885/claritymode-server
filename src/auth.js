@@ -17,7 +17,7 @@ async function createUser(email, password) {
 
 async function login(email, password) {
   const result = await db.query(
-    'SELECT id, email, password_hash, is_approved FROM users WHERE email = $1',
+    'SELECT id, email, password_hash, is_approved, enabled_packs FROM users WHERE email = $1',
     [email.toLowerCase().trim()]
   )
   const user = result.rows[0]
@@ -25,7 +25,8 @@ async function login(email, password) {
   const valid = await bcrypt.compare(password, user.password_hash)
   if (!valid) throw Object.assign(new Error('Invalid credentials'), { status: 401 })
   if (!user.is_approved) throw Object.assign(new Error('Account not authorized. Contact Amin to request access.'), { status: 403 })
-  return signToken({ id: user.id, email: user.email })
+  const { token } = signToken({ id: user.id, email: user.email })
+  return { token, enabledPacks: user.enabled_packs || [] }
 }
 
 function verifyToken(token) {

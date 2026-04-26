@@ -11,10 +11,8 @@ async function migrate() {
       created_at  TIMESTAMPTZ DEFAULT now()
     )
   `)
-  // Add is_approved to existing tables that predate this migration
-  await db.query(`
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS is_approved BOOLEAN NOT NULL DEFAULT false
-  `)
+  await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_approved BOOLEAN NOT NULL DEFAULT false`)
+  await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS enabled_packs TEXT[] NOT NULL DEFAULT '{}'`)
   console.log('Migration complete.')
   process.exit(0)
 }
