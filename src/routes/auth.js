@@ -68,6 +68,23 @@ router.post('/admin/reset-password', async (req, res) => {
   }
 })
 
+// Admin-only: list all users
+router.get('/admin/users', async (req, res) => {
+  const secret = req.headers['x-admin-secret']
+  if (!secret || secret !== process.env.ADMIN_SECRET) {
+    return res.status(401).json({ error: 'Unauthorized' })
+  }
+  const db = require('../db')
+  try {
+    const result = await db.query(
+      'SELECT email, is_approved, enabled_packs, created_at FROM users ORDER BY created_at DESC'
+    )
+    res.json({ users: result.rows })
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch users' })
+  }
+})
+
 // Admin-only: set enabled packs for a user
 router.patch('/admin/users/:email/packs', async (req, res) => {
   const secret = req.headers['x-admin-secret']

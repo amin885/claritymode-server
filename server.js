@@ -1,5 +1,6 @@
 require('dotenv').config()
 const express = require('express')
+const path = require('path')
 const authRoutes = require('./src/routes/auth')
 const chatRoutes = require('./src/routes/chat')
 
@@ -7,6 +8,7 @@ const app = express()
 app.use(express.json())
 app.use('/auth', authRoutes)
 app.use('/chat', chatRoutes)
+app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'src/admin/index.html')))
 
 if (require.main === module) {
   const PORT = process.env.PORT || 3000

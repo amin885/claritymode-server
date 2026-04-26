@@ -42,6 +42,22 @@ function makeToken() {
   return jwt.sign({ sub: 'user-1', email: 'a@b.com' }, process.env.JWT_SECRET)
 }
 
+describe('GET /auth/admin/users', () => {
+  it('returns 401 without admin secret', async () => {
+    const res = await request(app).get('/auth/admin/users')
+    expect(res.status).toBe(401)
+  })
+
+  it('returns user list with admin secret', async () => {
+    process.env.ADMIN_SECRET = 'test-secret'
+    db.query.mockResolvedValueOnce({ rows: [{ email: 'a@b.com', is_approved: true, enabled_packs: [], created_at: new Date() }] })
+    const res = await request(app).get('/auth/admin/users').set('x-admin-secret', 'test-secret')
+    expect(res.status).toBe(200)
+    expect(res.body.users).toHaveLength(1)
+    expect(res.body.users[0].email).toBe('a@b.com')
+  })
+})
+
 describe('POST /auth/admin/reset-password', () => {
   it('returns 401 without admin secret', async () => {
     const res = await request(app).post('/auth/admin/reset-password').send({ email: 'a@b.com', password: 'newpass123' })
