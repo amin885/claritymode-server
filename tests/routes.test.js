@@ -42,6 +42,34 @@ function makeToken() {
   return jwt.sign({ sub: 'user-1', email: 'a@b.com' }, process.env.JWT_SECRET)
 }
 
+describe('POST /auth/admin/reset-password', () => {
+  it('returns 401 without admin secret', async () => {
+    const res = await request(app).post('/auth/admin/reset-password').send({ email: 'a@b.com', password: 'newpass123' })
+    expect(res.status).toBe(401)
+  })
+
+  it('resets password for existing user', async () => {
+    process.env.ADMIN_SECRET = 'test-secret'
+    db.query.mockResolvedValueOnce({ rows: [{ email: 'a@b.com' }] })
+    const res = await request(app)
+      .post('/auth/admin/reset-password')
+      .set('x-admin-secret', 'test-secret')
+      .send({ email: 'a@b.com', password: 'newpass123' })
+    expect(res.status).toBe(200)
+    expect(res.body.ok).toBe(true)
+  })
+
+  it('returns 404 for unknown user', async () => {
+    process.env.ADMIN_SECRET = 'test-secret'
+    db.query.mockResolvedValueOnce({ rows: [] })
+    const res = await request(app)
+      .post('/auth/admin/reset-password')
+      .set('x-admin-secret', 'test-secret')
+      .send({ email: 'nope@b.com', password: 'newpass123' })
+    expect(res.status).toBe(404)
+  })
+})
+
 describe('POST /auth/change-password', () => {
   it('returns 401 without token', async () => {
     const res = await request(app).post('/auth/change-password').send({ currentPassword: 'old', newPassword: 'new' })

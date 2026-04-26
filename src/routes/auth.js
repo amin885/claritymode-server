@@ -50,6 +50,24 @@ router.post('/admin/create-user', async (req, res) => {
   }
 })
 
+// Admin-only: reset a user's password
+router.post('/admin/reset-password', async (req, res) => {
+  const secret = req.headers['x-admin-secret']
+  if (!secret || secret !== process.env.ADMIN_SECRET) {
+    return res.status(401).json({ error: 'Unauthorized' })
+  }
+  const { email, password } = req.body
+  if (!email || !password) return res.status(400).json({ error: 'email and password required' })
+  if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' })
+  try {
+    const { resetPassword } = require('../auth')
+    const user = await resetPassword(email, password)
+    res.json({ ok: true, email: user.email })
+  } catch (err) {
+    res.status(404).json({ error: err.message })
+  }
+})
+
 // Admin-only: set enabled packs for a user
 router.patch('/admin/users/:email/packs', async (req, res) => {
   const secret = req.headers['x-admin-secret']
