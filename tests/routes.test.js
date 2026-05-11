@@ -1,4 +1,16 @@
 process.env.JWT_SECRET = 'test-secret-for-jest-only'
+process.env.CLARITYMODE_SKILL_CATALOG = JSON.stringify({
+  skills: [
+    {
+      id: 'v2-test-skill',
+      name: 'V2 Test Skill',
+      description: 'Used by tests only.',
+      version: '1.0.0',
+      appliesTo: ['skill'],
+      content: '# V2 Test Skill\n\nUse only in v2 skill tests.',
+    },
+  ],
+})
 jest.mock('../src/db')
 jest.mock('../src/anthropic')
 const db = require('../src/db')
@@ -50,12 +62,12 @@ describe('GET /auth/admin/users', () => {
 
   it('returns user list with admin secret', async () => {
     process.env.ADMIN_SECRET = 'test-secret'
-    db.query.mockResolvedValueOnce({ rows: [{ email: 'a@b.com', is_approved: true, enabled_packs: [], enabled_v2_skills: ['podcast'], created_at: new Date() }] })
+    db.query.mockResolvedValueOnce({ rows: [{ email: 'a@b.com', is_approved: true, enabled_packs: [], enabled_v2_skills: ['v2-test-skill'], created_at: new Date() }] })
     const res = await request(app).get('/auth/admin/users').set('x-admin-secret', 'test-secret')
     expect(res.status).toBe(200)
     expect(res.body.users).toHaveLength(1)
     expect(res.body.users[0].email).toBe('a@b.com')
-    expect(res.body.users[0].enabled_v2_skills).toEqual(['podcast'])
+    expect(res.body.users[0].enabled_v2_skills).toEqual(['v2-test-skill'])
   })
 })
 
@@ -112,13 +124,13 @@ describe('PATCH /auth/admin/users/:email/v2-skills', () => {
 
   it('sets known v2 skill ids separately from v1 packs', async () => {
     process.env.ADMIN_SECRET = 'test-secret'
-    db.query.mockResolvedValueOnce({ rows: [{ email: 'a@b.com', enabled_v2_skills: ['podcast'] }] })
+    db.query.mockResolvedValueOnce({ rows: [{ email: 'a@b.com', enabled_v2_skills: ['v2-test-skill'] }] })
     const res = await request(app)
       .patch('/auth/admin/users/a@b.com/v2-skills')
       .set('x-admin-secret', 'test-secret')
-      .send({ skills: ['podcast'] })
+      .send({ skills: ['v2-test-skill'] })
     expect(res.status).toBe(200)
-    expect(res.body.enabledV2Skills).toEqual(['podcast'])
+    expect(res.body.enabledV2Skills).toEqual(['v2-test-skill'])
   })
 })
 
@@ -194,14 +206,14 @@ describe('GET /v2/skills/available', () => {
   })
 
   it('returns only skills enabled for the logged-in user', async () => {
-    db.query.mockResolvedValueOnce({ rows: [{ enabled_v2_skills: ['podcast'] }] })
+    db.query.mockResolvedValueOnce({ rows: [{ enabled_v2_skills: ['v2-test-skill'] }] })
     const res = await request(app)
       .get('/v2/skills/available')
       .set('Authorization', `Bearer ${makeToken()}`)
     expect(res.status).toBe(200)
     expect(res.body.skills).toHaveLength(1)
-    expect(res.body.skills[0].id).toBe('podcast')
-    expect(res.body.skills[0].content).toContain('Podcast Pack')
+    expect(res.body.skills[0].id).toBe('v2-test-skill')
+    expect(res.body.skills[0].content).toContain('V2 Test Skill')
   })
 
   it('hides skills not assigned to the logged-in user', async () => {
@@ -224,7 +236,7 @@ describe('GET /auth/admin/skills/catalog', () => {
     process.env.ADMIN_SECRET = 'test-secret'
     const res = await request(app).get('/auth/admin/skills/catalog').set('x-admin-secret', 'test-secret')
     expect(res.status).toBe(200)
-    expect(res.body.skills[0].id).toBe('podcast')
+    expect(res.body.skills[0].id).toBe('v2-test-skill')
     expect(res.body.skills[0].content).toBeUndefined()
   })
 })
@@ -239,7 +251,7 @@ describe('GET /auth/admin/v2/skills/catalog', () => {
     process.env.ADMIN_SECRET = 'test-secret'
     const res = await request(app).get('/auth/admin/v2/skills/catalog').set('x-admin-secret', 'test-secret')
     expect(res.status).toBe(200)
-    expect(res.body.skills[0].id).toBe('podcast')
+    expect(res.body.skills[0].id).toBe('v2-test-skill')
     expect(res.body.skills[0].content).toBeUndefined()
   })
 })

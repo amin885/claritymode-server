@@ -1,19 +1,4 @@
-const DEFAULT_SKILL_CATALOG = [
-  {
-    id: 'podcast',
-    name: 'Podcast Pack',
-    description: 'Helps shape episode ideas, outlines, show notes, and publishing follow-up.',
-    version: '1.0.0',
-    appliesTo: ['skill'],
-    content: [
-      '# Podcast Pack',
-      '',
-      'Use this skill only inside the explicit skill routine.',
-      'Help the user turn rough podcast ideas into useful episode plans, outlines, show notes, and practical next actions.',
-      'Keep recommendations concise, specific, and confirmation-based when suggesting saved changes.',
-    ].join('\n'),
-  },
-]
+const DEFAULT_SKILL_CATALOG = []
 
 function getSkillCatalog() {
   const raw = process.env.CLARITYMODE_SKILL_CATALOG
