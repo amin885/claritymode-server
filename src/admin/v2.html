@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ClarityMode V2 Admin</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-stone-50 min-h-screen font-sans">
+<div id="login-screen" class="flex items-center justify-center min-h-screen">
+  <div class="bg-white rounded-2xl shadow-sm border border-stone-200 p-8 w-full max-w-sm space-y-4">
+    <h1 class="text-lg font-semibold text-stone-800">ClarityMode V2 Admin</h1>
+    <p class="text-xs text-stone-500">V2 skills are separate from v1 packs.</p>
+    <input id="secret-input" type="password" placeholder="Admin secret"
+      class="w-full px-3 py-2.5 rounded-xl border border-stone-200 text-sm focus:outline-none focus:border-stone-400"
+      onkeydown="if(event.key==='Enter') login()" />
+    <p id="login-error" class="text-xs text-red-500 hidden"></p>
+    <button onclick="login()"
+      class="w-full py-2.5 rounded-xl bg-stone-800 text-white text-sm font-medium hover:bg-stone-700 transition-colors">
+      Sign in
+    </button>
+  </div>
+</div>
+
+<div id="admin-screen" class="hidden max-w-4xl mx-auto px-6 py-10 space-y-8">
+  <div class="flex items-center justify-between">
+    <div>
+      <h1 class="text-lg font-semibold text-stone-800">ClarityMode V2 Admin</h1>
+      <p class="mt-1 text-xs text-stone-500">Create testers, reset passwords, and assign V2 skills only.</p>
+    </div>
+    <button onclick="logout()" class="text-xs text-stone-400 hover:text-stone-600">Sign out</button>
+  </div>
+
+  <div class="bg-white rounded-2xl border border-stone-200 p-6 space-y-4">
+    <h2 class="text-sm font-semibold text-stone-700">Create user</h2>
+    <div class="flex gap-3">
+      <input id="new-email" type="email" placeholder="Email"
+        class="flex-1 px-3 py-2 rounded-xl border border-stone-200 text-sm focus:outline-none focus:border-stone-400" />
+      <input id="new-password" type="password" placeholder="Password (min 8 chars)"
+        class="flex-1 px-3 py-2 rounded-xl border border-stone-200 text-sm focus:outline-none focus:border-stone-400" />
+      <button onclick="createUser()"
+        class="px-4 py-2 rounded-xl bg-stone-800 text-white text-sm font-medium hover:bg-stone-700 transition-colors whitespace-nowrap">
+        Create
+      </button>
+    </div>
+    <p id="create-msg" class="text-xs hidden"></p>
+  </div>
+
+  <div class="bg-white rounded-2xl border border-stone-200 overflow-hidden">
+    <div class="px-6 py-4 border-b border-stone-100 flex items-center justify-between">
+      <h2 class="text-sm font-semibold text-stone-700">Users</h2>
+      <button onclick="loadUsers()" class="text-xs text-stone-400 hover:text-stone-600">Refresh</button>
+    </div>
+    <div id="users-container" class="divide-y divide-stone-100">
+      <p class="px-6 py-4 text-sm text-stone-400">Loading...</p>
+    </div>
+  </div>
+</div>
+
+<div id="reset-modal" class="hidden fixed inset-0 bg-black/20 flex items-center justify-center z-50">
+  <div class="bg-white rounded-2xl shadow-xl p-6 w-full max-w-sm space-y-4">
+    <h2 class="text-sm font-semibold text-stone-700">Reset password</h2>
+    <p id="reset-email-label" class="text-xs text-stone-500"></p>
+    <input id="reset-password-input" type="password" placeholder="New password (min 8 chars)"
+      class="w-full px-3 py-2.5 rounded-xl border border-stone-200 text-sm focus:outline-none focus:border-stone-400"
+      onkeydown="if(event.key==='Enter') confirmReset()" />
+    <p id="reset-msg" class="text-xs hidden"></p>
+    <div class="flex gap-2">
+      <button onclick="closeModal('reset-modal')" class="flex-1 py-2 rounded-xl border border-stone-200 text-stone-500 text-sm hover:border-stone-300 transition-colors">Cancel</button>
+      <button onclick="confirmReset()" class="flex-1 py-2 rounded-xl bg-stone-800 text-white text-sm font-medium hover:bg-stone-700 transition-colors">Reset</button>
+    </div>
+  </div>
+</div>
+
+<div id="skills-modal" class="hidden fixed inset-0 bg-black/20 flex items-center justify-center z-50">
+  <div class="bg-white rounded-2xl shadow-xl p-6 w-full max-w-sm space-y-4">
+    <h2 class="text-sm font-semibold text-stone-700">Edit V2 skills</h2>
+    <p id="skills-email-label" class="text-xs text-stone-500"></p>
+    <div id="skills-checkboxes" class="space-y-2"></div>
+    <p id="skills-msg" class="text-xs hidden"></p>
+    <div class="flex gap-2">
+      <button onclick="closeModal('skills-modal')" class="flex-1 py-2 rounded-xl border border-stone-200 text-stone-500 text-sm hover:border-stone-300 transition-colors">Cancel</button>
+      <button onclick="confirmSkills()" class="flex-1 py-2 rounded-xl bg-stone-800 text-white text-sm font-medium hover:bg-stone-700 transition-colors">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  let availableSkills = []
+  let adminSecret = ''
+  let resetTarget = ''
+  let skillsTarget = ''
+
+  function login() {
+    const secret = document.getElementById('secret-input').value.trim()
+    if (!secret) return
+    adminSecret = secret
+    loadUsers()
+  }
+
+  function logout() {
+    adminSecret = ''
+    document.getElementById('admin-screen').classList.add('hidden')
+    document.getElementById('login-screen').classList.remove('hidden')
+    document.getElementById('secret-input').value = ''
+  }
+
+  async function loadUsers() {
+    await loadSkillCatalog()
+    const res = await fetch('/auth/admin/users', { headers: { 'x-admin-secret': adminSecret } })
+    if (res.status === 401) {
+      document.getElementById('login-error').textContent = 'Incorrect secret.'
+      document.getElementById('login-error').classList.remove('hidden')
+      return
+    }
+    document.getElementById('login-screen').classList.add('hidden')
+    document.getElementById('admin-screen').classList.remove('hidden')
+
+    const { users } = await res.json()
+    const container = document.getElementById('users-container')
+    if (!users.length) {
+      container.innerHTML = '<p class="px-6 py-4 text-sm text-stone-400">No users yet.</p>'
+      return
+    }
+    container.innerHTML = users.map(u => `
+      <div class="px-6 py-4 flex items-center justify-between gap-4">
+        <div class="min-w-0">
+          <div class="flex items-center gap-2">
+            <p class="text-sm font-medium text-stone-800 truncate">${u.email}</p>
+            <span class="text-xs px-2 py-0.5 rounded-full ${u.is_approved ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}">${u.is_approved ? 'approved' : 'suspended'}</span>
+          </div>
+          <p class="text-xs text-stone-400 mt-0.5">
+            V2 skills: ${u.enabled_v2_skills && u.enabled_v2_skills.length ? u.enabled_v2_skills.join(', ') : 'none'} &middot;
+            ${new Date(u.created_at).toLocaleDateString()}
+          </p>
+        </div>
+        <div class="flex gap-2 shrink-0">
+          <button onclick="toggleApproved('${u.email}', ${u.is_approved})" class="px-3 py-1.5 rounded-lg border text-xs transition-colors ${u.is_approved ? 'border-stone-200 text-stone-500 hover:text-red-500 hover:border-red-200' : 'border-green-200 text-green-600 hover:bg-green-50'}">${u.is_approved ? 'Suspend' : 'Approve'}</button>
+          <button onclick="openResetModal('${u.email}')" class="px-3 py-1.5 rounded-lg border border-stone-200 text-stone-500 text-xs hover:border-stone-300 hover:text-stone-700 transition-colors">Reset password</button>
+          <button onclick="openSkillsModal('${u.email}', ${JSON.stringify(u.enabled_v2_skills || [])})" class="px-3 py-1.5 rounded-lg border border-stone-200 text-stone-500 text-xs hover:border-stone-300 hover:text-stone-700 transition-colors">Edit V2 skills</button>
+        </div>
+      </div>
+    `).join('')
+  }
+
+  async function loadSkillCatalog() {
+    const res = await fetch('/auth/admin/v2/skills/catalog', { headers: { 'x-admin-secret': adminSecret } })
+    if (!res.ok) return
+    const data = await res.json()
+    availableSkills = data.skills || []
+  }
+
+  async function createUser() {
+    const email = document.getElementById('new-email').value.trim()
+    const password = document.getElementById('new-password').value
+    const msg = document.getElementById('create-msg')
+    msg.classList.remove('hidden', 'text-red-500', 'text-green-600')
+    if (!email || !password) {
+      msg.textContent = 'Email and password required.'
+      msg.classList.add('text-red-500')
+      msg.classList.remove('hidden')
+      return
+    }
+    const res = await fetch('/auth/admin/create-user', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-admin-secret': adminSecret },
+      body: JSON.stringify({ email, password })
+    })
+    const data = await res.json()
+    if (res.ok) {
+      msg.textContent = `Created ${data.email}`
+      msg.classList.add('text-green-600')
+      document.getElementById('new-email').value = ''
+      document.getElementById('new-password').value = ''
+      loadUsers()
+    } else {
+      msg.textContent = data.error || 'Failed to create user.'
+      msg.classList.add('text-red-500')
+    }
+    msg.classList.remove('hidden')
+  }
+
+  async function toggleApproved(email, currentlyApproved) {
+    const res = await fetch(`/auth/admin/users/${encodeURIComponent(email)}/approved`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'x-admin-secret': adminSecret },
+      body: JSON.stringify({ approved: !currentlyApproved })
+    })
+    if (res.ok) loadUsers()
+  }
+
+  function openResetModal(email) {
+    resetTarget = email
+    document.getElementById('reset-email-label').textContent = email
+    document.getElementById('reset-password-input').value = ''
+    document.getElementById('reset-msg').classList.add('hidden')
+    document.getElementById('reset-modal').classList.remove('hidden')
+    setTimeout(() => document.getElementById('reset-password-input').focus(), 50)
+  }
+
+  async function confirmReset() {
+    const password = document.getElementById('reset-password-input').value
+    const msg = document.getElementById('reset-msg')
+    msg.classList.add('hidden')
+    const res = await fetch('/auth/admin/reset-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-admin-secret': adminSecret },
+      body: JSON.stringify({ email: resetTarget, password })
+    })
+    const data = await res.json()
+    if (res.ok) closeModal('reset-modal')
+    else {
+      msg.textContent = data.error || 'Failed to reset password.'
+      msg.classList.remove('hidden')
+      msg.classList.add('text-red-500')
+    }
+  }
+
+  function openSkillsModal(email, currentSkills) {
+    skillsTarget = email
+    document.getElementById('skills-email-label').textContent = email
+    document.getElementById('skills-msg').classList.add('hidden')
+    const container = document.getElementById('skills-checkboxes')
+    container.innerHTML = availableSkills.length ? availableSkills.map(skill => `
+      <label class="block px-3 py-2 rounded-xl border border-stone-100 hover:border-stone-200 cursor-pointer">
+        <div class="flex items-center gap-3">
+          <input type="checkbox" value="${skill.id}" ${currentSkills.includes(skill.id) ? 'checked' : ''} class="w-4 h-4 rounded accent-stone-800" />
+          <span class="text-sm text-stone-700">${skill.name || skill.id}</span>
+        </div>
+        ${skill.description ? `<p class="mt-1 pl-7 text-xs text-stone-400">${skill.description}</p>` : ''}
+      </label>
+    `).join('') : '<p class="text-sm text-stone-400">No V2 skills are configured.</p>'
+    document.getElementById('skills-modal').classList.remove('hidden')
+  }
+
+  async function confirmSkills() {
+    const checked = [...document.querySelectorAll('#skills-checkboxes input:checked')].map(el => el.value)
+    const msg = document.getElementById('skills-msg')
+    msg.classList.add('hidden')
+    const res = await fetch(`/auth/admin/users/${encodeURIComponent(skillsTarget)}/v2-skills`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'x-admin-secret': adminSecret },
+      body: JSON.stringify({ skills: checked })
+    })
+    const data = await res.json()
+    if (res.ok) {
+      closeModal('skills-modal')
+      loadUsers()
+    } else {
+      msg.textContent = data.error || 'Failed to update V2 skills.'
+      msg.classList.remove('hidden')
+      msg.classList.add('text-red-500')
+    }
+  }
+
+  function closeModal(id) {
+    document.getElementById(id).classList.add('hidden')
+  }
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      closeModal('reset-modal')
+      closeModal('skills-modal')
+    }
+  })
+</script>
+</body>
+</html>

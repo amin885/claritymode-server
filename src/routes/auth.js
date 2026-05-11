@@ -1,6 +1,7 @@
 const express = require('express')
 const { createUser, login, changePassword } = require('../auth')
 const requireAuth = require('../middleware/requireAuth')
+const { getSkillCatalog } = require('../skills')
 
 const router = express.Router()
 
@@ -77,7 +78,7 @@ router.get('/admin/users', async (req, res) => {
   const db = require('../db')
   try {
     const result = await db.query(
-      'SELECT email, is_approved, enabled_packs, created_at FROM users ORDER BY created_at DESC'
+      'SELECT email, is_approved, enabled_packs, enabled_v2_skills, created_at FROM users ORDER BY created_at DESC'
     )
     res.json({ users: result.rows })
   } catch (err) {
@@ -114,16 +115,42 @@ router.patch('/admin/users/:email/packs', async (req, res) => {
   }
   const { packs } = req.body
   if (!Array.isArray(packs)) return res.status(400).json({ error: 'packs must be an array' })
+  const normalizedPacks = packs.map(pack => String(pack).trim()).filter(Boolean)
   const db = require('../db')
   try {
     const result = await db.query(
       'UPDATE users SET enabled_packs = $1 WHERE email = $2 RETURNING email, enabled_packs',
-      [packs, req.params.email.toLowerCase().trim()]
+      [normalizedPacks, req.params.email.toLowerCase().trim()]
     )
     if (!result.rows[0]) return res.status(404).json({ error: 'User not found' })
     res.json({ ok: true, email: result.rows[0].email, enabledPacks: result.rows[0].enabled_packs })
   } catch (err) {
     res.status(500).json({ error: 'Failed to update packs' })
+  }
+})
+
+// Admin-only: set v2 skills for a user. Separate from v1 enabled_packs.
+router.patch('/admin/users/:email/v2-skills', async (req, res) => {
+  const secret = req.headers['x-admin-secret']
+  if (!secret || secret !== process.env.ADMIN_SECRET) {
+    return res.status(401).json({ error: 'Unauthorized' })
+  }
+  const { skills } = req.body
+  if (!Array.isArray(skills)) return res.status(400).json({ error: 'skills must be an array' })
+  const allowedSkillIds = new Set(getSkillCatalog().map(skill => skill.id))
+  const normalizedSkills = skills.map(skill => String(skill).trim()).filter(Boolean)
+  const unknownSkill = normalizedSkills.find(skill => !allowedSkillIds.has(skill))
+  if (unknownSkill) return res.status(400).json({ error: `Unknown v2 skill: ${unknownSkill}` })
+  const db = require('../db')
+  try {
+    const result = await db.query(
+      'UPDATE users SET enabled_v2_skills = $1 WHERE email = $2 RETURNING email, enabled_v2_skills',
+      [normalizedSkills, req.params.email.toLowerCase().trim()]
+    )
+    if (!result.rows[0]) return res.status(404).json({ error: 'User not found' })
+    res.json({ ok: true, email: result.rows[0].email, enabledV2Skills: result.rows[0].enabled_v2_skills })
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update v2 skills' })
   }
 })
 

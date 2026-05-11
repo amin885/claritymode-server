@@ -17,7 +17,7 @@ async function createUser(email, password) {
 
 async function login(email, password) {
   const result = await db.query(
-    'SELECT id, email, password_hash, is_approved, enabled_packs FROM users WHERE email = $1',
+    'SELECT id, email, password_hash, is_approved, enabled_packs, enabled_v2_skills FROM users WHERE email = $1',
     [email.toLowerCase().trim()]
   )
   const user = result.rows[0]
@@ -26,7 +26,11 @@ async function login(email, password) {
   if (!valid) throw Object.assign(new Error('Invalid credentials'), { status: 401 })
   if (!user.is_approved) throw Object.assign(new Error('Account not authorized. Contact Amin to request access.'), { status: 403 })
   const { token } = signToken({ id: user.id, email: user.email })
-  return { token, enabledPacks: user.enabled_packs || [] }
+  return {
+    token,
+    enabledPacks: user.enabled_packs || [],
+    enabledV2Skills: user.enabled_v2_skills || [],
+  }
 }
 
 async function changePassword(email, currentPassword, newPassword) {

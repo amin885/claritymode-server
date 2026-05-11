@@ -4,13 +4,16 @@ const path = require('path')
 const authRoutes = require('./src/routes/auth')
 const chatRoutes = require('./src/routes/chat')
 const updateRoutes = require('./src/routes/updates')
+const skillRoutes = require('./src/routes/skills')
 
 const app = express()
 app.use(express.json())
 app.use('/auth', authRoutes)
 app.use('/chat', chatRoutes)
 app.use('/updates', updateRoutes)
+app.use(skillRoutes)
 app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'src/admin/index.html')))
+app.get('/admin/v2', (req, res) => res.sendFile(path.join(__dirname, 'src/admin/v2.html')))
 
 if (require.main === module) {
   const PORT = process.env.PORT || 3000
@@ -28,6 +31,7 @@ if (require.main === module) {
   `)
     .then(() => db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_approved BOOLEAN NOT NULL DEFAULT false`))
     .then(() => db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS enabled_packs TEXT[] NOT NULL DEFAULT '{}'`))
+    .then(() => db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS enabled_v2_skills TEXT[] NOT NULL DEFAULT '{}'`))
     .then(() => console.log('Database ready.'))
     .catch(err => console.error('Migration warning:', JSON.stringify(err), err.message, err.code))
     .finally(() => {

@@ -50,11 +50,12 @@ describe('GET /auth/admin/users', () => {
 
   it('returns user list with admin secret', async () => {
     process.env.ADMIN_SECRET = 'test-secret'
-    db.query.mockResolvedValueOnce({ rows: [{ email: 'a@b.com', is_approved: true, enabled_packs: [], created_at: new Date() }] })
+    db.query.mockResolvedValueOnce({ rows: [{ email: 'a@b.com', is_approved: true, enabled_packs: [], enabled_v2_skills: ['podcast'], created_at: new Date() }] })
     const res = await request(app).get('/auth/admin/users').set('x-admin-secret', 'test-secret')
     expect(res.status).toBe(200)
     expect(res.body.users).toHaveLength(1)
     expect(res.body.users[0].email).toBe('a@b.com')
+    expect(res.body.users[0].enabled_v2_skills).toEqual(['podcast'])
   })
 })
 
@@ -82,6 +83,42 @@ describe('PATCH /auth/admin/users/:email/approved', () => {
       .set('x-admin-secret', 'test-secret')
       .send({ approved: 'yes' })
     expect(res.status).toBe(400)
+  })
+})
+
+describe('PATCH /auth/admin/users/:email/packs', () => {
+  it('sets v1 pack ids without using the v2 skill catalog', async () => {
+    process.env.ADMIN_SECRET = 'test-secret'
+    db.query.mockResolvedValueOnce({ rows: [{ email: 'a@b.com', enabled_packs: ['legacy-pack'] }] })
+    const res = await request(app)
+      .patch('/auth/admin/users/a@b.com/packs')
+      .set('x-admin-secret', 'test-secret')
+      .send({ packs: ['legacy-pack'] })
+    expect(res.status).toBe(200)
+    expect(res.body.enabledPacks).toEqual(['legacy-pack'])
+  })
+})
+
+describe('PATCH /auth/admin/users/:email/v2-skills', () => {
+  it('rejects unknown v2 skill ids', async () => {
+    process.env.ADMIN_SECRET = 'test-secret'
+    const res = await request(app)
+      .patch('/auth/admin/users/a@b.com/v2-skills')
+      .set('x-admin-secret', 'test-secret')
+      .send({ skills: ['not-real'] })
+    expect(res.status).toBe(400)
+    expect(res.body.error).toContain('Unknown v2 skill')
+  })
+
+  it('sets known v2 skill ids separately from v1 packs', async () => {
+    process.env.ADMIN_SECRET = 'test-secret'
+    db.query.mockResolvedValueOnce({ rows: [{ email: 'a@b.com', enabled_v2_skills: ['podcast'] }] })
+    const res = await request(app)
+      .patch('/auth/admin/users/a@b.com/v2-skills')
+      .set('x-admin-secret', 'test-secret')
+      .send({ skills: ['podcast'] })
+    expect(res.status).toBe(200)
+    expect(res.body.enabledV2Skills).toEqual(['podcast'])
   })
 })
 
@@ -147,6 +184,63 @@ describe('POST /auth/change-password', () => {
       .send({ currentPassword: 'oldpass1', newPassword: 'newpass1' })
     expect(res.status).toBe(200)
     expect(res.body.ok).toBe(true)
+  })
+})
+
+describe('GET /v2/skills/available', () => {
+  it('returns 401 without token', async () => {
+    const res = await request(app).get('/v2/skills/available')
+    expect(res.status).toBe(401)
+  })
+
+  it('returns only skills enabled for the logged-in user', async () => {
+    db.query.mockResolvedValueOnce({ rows: [{ enabled_v2_skills: ['podcast'] }] })
+    const res = await request(app)
+      .get('/v2/skills/available')
+      .set('Authorization', `Bearer ${makeToken()}`)
+    expect(res.status).toBe(200)
+    expect(res.body.skills).toHaveLength(1)
+    expect(res.body.skills[0].id).toBe('podcast')
+    expect(res.body.skills[0].content).toContain('Podcast Pack')
+  })
+
+  it('hides skills not assigned to the logged-in user', async () => {
+    db.query.mockResolvedValueOnce({ rows: [{ enabled_v2_skills: [] }] })
+    const res = await request(app)
+      .get('/v2/skills/available')
+      .set('Authorization', `Bearer ${makeToken()}`)
+    expect(res.status).toBe(200)
+    expect(res.body.skills).toEqual([])
+  })
+})
+
+describe('GET /auth/admin/skills/catalog', () => {
+  it('returns 401 without admin secret', async () => {
+    const res = await request(app).get('/auth/admin/skills/catalog')
+    expect(res.status).toBe(401)
+  })
+
+  it('returns skill catalog metadata without skill content', async () => {
+    process.env.ADMIN_SECRET = 'test-secret'
+    const res = await request(app).get('/auth/admin/skills/catalog').set('x-admin-secret', 'test-secret')
+    expect(res.status).toBe(200)
+    expect(res.body.skills[0].id).toBe('podcast')
+    expect(res.body.skills[0].content).toBeUndefined()
+  })
+})
+
+describe('GET /auth/admin/v2/skills/catalog', () => {
+  it('returns 401 without admin secret', async () => {
+    const res = await request(app).get('/auth/admin/v2/skills/catalog')
+    expect(res.status).toBe(401)
+  })
+
+  it('returns v2 skill catalog metadata without skill content', async () => {
+    process.env.ADMIN_SECRET = 'test-secret'
+    const res = await request(app).get('/auth/admin/v2/skills/catalog').set('x-admin-secret', 'test-secret')
+    expect(res.status).toBe(200)
+    expect(res.body.skills[0].id).toBe('podcast')
+    expect(res.body.skills[0].content).toBeUndefined()
   })
 })
 
