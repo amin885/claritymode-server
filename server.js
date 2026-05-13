@@ -32,6 +32,20 @@ if (require.main === module) {
     .then(() => db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_approved BOOLEAN NOT NULL DEFAULT false`))
     .then(() => db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS enabled_packs TEXT[] NOT NULL DEFAULT '{}'`))
     .then(() => db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS enabled_v2_skills TEXT[] NOT NULL DEFAULT '{}'`))
+    .then(() => db.query(`
+      CREATE TABLE IF NOT EXISTS v2_skills (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        version TEXT NOT NULL DEFAULT '',
+        source_url TEXT NOT NULL DEFAULT '',
+        content TEXT NOT NULL,
+        summary TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'active',
+        created_at TIMESTAMPTZ DEFAULT now(),
+        updated_at TIMESTAMPTZ DEFAULT now()
+      )
+    `))
     .then(() => console.log('Database ready.'))
     .catch(err => console.error('Migration warning:', JSON.stringify(err), err.message, err.code))
     .finally(() => {

@@ -46,6 +46,42 @@
     <p id="create-msg" class="text-xs hidden"></p>
   </div>
 
+  <div class="bg-white rounded-2xl border border-stone-200 p-6 space-y-4">
+    <div class="flex items-start justify-between gap-4">
+      <div>
+        <h2 class="text-sm font-semibold text-stone-700">Skill Packs</h2>
+        <p class="mt-1 text-xs text-stone-500">Import a SKILL.md from a raw URL or pasted markdown, review Maude's summary, then assign it to selected V2 users.</p>
+      </div>
+      <button onclick="loadInstalledSkills()" class="text-xs text-stone-400 hover:text-stone-600">Refresh</button>
+    </div>
+    <div class="grid gap-3 md:grid-cols-2">
+      <input id="skill-source-url" type="url" placeholder="Raw SKILL.md URL"
+        class="px-3 py-2 rounded-xl border border-stone-200 text-sm focus:outline-none focus:border-stone-400" />
+      <input id="skill-source-name" type="text" placeholder="Optional display name override"
+        class="px-3 py-2 rounded-xl border border-stone-200 text-sm focus:outline-none focus:border-stone-400" />
+    </div>
+    <textarea id="skill-source-content" rows="8" placeholder="Or paste SKILL.md content here"
+      class="w-full px-3 py-2 rounded-xl border border-stone-200 text-sm focus:outline-none focus:border-stone-400"></textarea>
+    <div class="flex flex-wrap gap-2">
+      <button onclick="previewSkill()" class="px-4 py-2 rounded-xl bg-stone-800 text-white text-sm font-medium hover:bg-stone-700 transition-colors">
+        Preview Skill
+      </button>
+      <button onclick="installPreviewedSkill()" id="install-skill-button" disabled class="px-4 py-2 rounded-xl border border-stone-200 text-stone-400 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50 hover:border-stone-300 transition-colors">
+        Install Preview
+      </button>
+    </div>
+    <p id="skill-import-msg" class="text-xs hidden"></p>
+    <div id="skill-preview" class="hidden rounded-xl border border-stone-100 bg-stone-50 p-4 text-sm"></div>
+    <div>
+      <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-stone-400">Assign to users after install</h3>
+      <div id="skill-assign-users" class="grid gap-2 md:grid-cols-2 text-sm text-stone-600"></div>
+    </div>
+    <div>
+      <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-stone-400">Installed V2 skills</h3>
+      <div id="installed-skills" class="space-y-2 text-sm text-stone-500"></div>
+    </div>
+  </div>
+
   <div class="bg-white rounded-2xl border border-stone-200 overflow-hidden">
     <div class="px-6 py-4 border-b border-stone-100 flex items-center justify-between">
       <h2 class="text-sm font-semibold text-stone-700">Users</h2>
@@ -87,6 +123,9 @@
 
 <script>
   let availableSkills = []
+  let installedSkills = []
+  let currentUsers = []
+  let previewedSkill = null
   let adminSecret = ''
   let resetTarget = ''
   let skillsTarget = ''
@@ -107,6 +146,7 @@
 
   async function loadUsers() {
     await loadSkillCatalog()
+    await loadInstalledSkills()
     const res = await fetch('/auth/admin/users', { headers: { 'x-admin-secret': adminSecret } })
     if (res.status === 401) {
       document.getElementById('login-error').textContent = 'Incorrect secret.'
@@ -117,6 +157,8 @@
     document.getElementById('admin-screen').classList.remove('hidden')
 
     const { users } = await res.json()
+    currentUsers = users || []
+    renderAssignUsers()
     const container = document.getElementById('users-container')
     if (!users.length) {
       container.innerHTML = '<p class="px-6 py-4 text-sm text-stone-400">No users yet.</p>'
@@ -148,6 +190,100 @@
     if (!res.ok) return
     const data = await res.json()
     availableSkills = data.skills || []
+  }
+
+  async function loadInstalledSkills() {
+    if (!adminSecret) return
+    const res = await fetch('/auth/admin/v2/skills', { headers: { 'x-admin-secret': adminSecret } })
+    if (!res.ok) return
+    const data = await res.json()
+    installedSkills = data.skills || []
+    const container = document.getElementById('installed-skills')
+    container.innerHTML = installedSkills.length ? installedSkills.map(skill => `
+      <div class="rounded-xl border border-stone-100 px-3 py-2">
+        <div class="font-medium text-stone-700">${escapeHtml(skill.name || skill.id)}</div>
+        <div class="mt-1 text-xs text-stone-400">${escapeHtml(skill.id)}${skill.version ? ` · v${escapeHtml(skill.version)}` : ''}</div>
+        ${skill.summary ? `<div class="mt-2 text-xs leading-5 text-stone-500">${escapeHtml(skill.summary)}</div>` : ''}
+      </div>
+    `).join('') : '<p class="text-sm text-stone-400">No V2 skills are installed yet.</p>'
+  }
+
+  function renderAssignUsers() {
+    const container = document.getElementById('skill-assign-users')
+    container.innerHTML = currentUsers.length ? currentUsers.map(user => `
+      <label class="flex items-center gap-2 rounded-xl border border-stone-100 px-3 py-2">
+        <input type="checkbox" value="${escapeHtml(user.email)}" class="skill-assign-checkbox w-4 h-4 rounded accent-stone-800" />
+        <span>${escapeHtml(user.email)}</span>
+      </label>
+    `).join('') : '<p class="text-sm text-stone-400">Create a user before assigning skills.</p>'
+  }
+
+  async function previewSkill() {
+    const msg = document.getElementById('skill-import-msg')
+    msg.className = 'text-xs hidden'
+    document.getElementById('install-skill-button').disabled = true
+    previewedSkill = null
+    const sourceUrl = document.getElementById('skill-source-url').value.trim()
+    const content = document.getElementById('skill-source-content').value.trim()
+    const nameOverride = document.getElementById('skill-source-name').value.trim()
+    const res = await fetch('/auth/admin/v2/skills/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-admin-secret': adminSecret },
+      body: JSON.stringify({ sourceUrl, content })
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      msg.textContent = data.error || 'Failed to preview skill.'
+      msg.className = 'text-xs text-red-500'
+      return
+    }
+    previewedSkill = { ...data.skill, name: nameOverride || data.skill.name }
+    renderSkillPreview()
+    document.getElementById('install-skill-button').disabled = false
+  }
+
+  function renderSkillPreview() {
+    const container = document.getElementById('skill-preview')
+    const skill = previewedSkill
+    if (!skill) {
+      container.classList.add('hidden')
+      return
+    }
+    container.innerHTML = `
+      <div class="font-semibold text-stone-800">${escapeHtml(skill.name)}</div>
+      <div class="mt-1 text-xs text-stone-400">${escapeHtml(skill.id)}${skill.version ? ` · v${escapeHtml(skill.version)}` : ''}</div>
+      ${skill.description ? `<p class="mt-3 text-stone-600">${escapeHtml(skill.description)}</p>` : ''}
+      <div class="mt-4 rounded-xl bg-white border border-stone-100 p-3">
+        <div class="mb-1 text-xs font-semibold uppercase tracking-wide text-stone-400">Maude summary</div>
+        <p class="whitespace-pre-wrap text-stone-600">${escapeHtml(skill.summary || 'No summary generated.')}</p>
+      </div>
+    `
+    container.classList.remove('hidden')
+  }
+
+  async function installPreviewedSkill() {
+    if (!previewedSkill) return
+    const msg = document.getElementById('skill-import-msg')
+    msg.className = 'text-xs hidden'
+    const assignTo = [...document.querySelectorAll('.skill-assign-checkbox:checked')].map(el => el.value)
+    const res = await fetch('/auth/admin/v2/skills', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-admin-secret': adminSecret },
+      body: JSON.stringify({ ...previewedSkill, assignTo })
+    })
+    const data = await res.json()
+    if (res.ok) {
+      msg.textContent = `Installed ${data.skill.name || data.skill.id}.`
+      msg.className = 'text-xs text-green-600'
+      document.getElementById('install-skill-button').disabled = true
+      previewedSkill = null
+      document.getElementById('skill-preview').classList.add('hidden')
+      await loadInstalledSkills()
+      await loadUsers()
+    } else {
+      msg.textContent = data.error || 'Failed to install skill.'
+      msg.className = 'text-xs text-red-500'
+    }
   }
 
   async function createUser() {
@@ -255,6 +391,15 @@
 
   function closeModal(id) {
     document.getElementById(id).classList.add('hidden')
+  }
+
+  function escapeHtml(value) {
+    return String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;')
   }
 
   document.addEventListener('keydown', e => {

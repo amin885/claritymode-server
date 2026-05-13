@@ -124,6 +124,7 @@ describe('PATCH /auth/admin/users/:email/v2-skills', () => {
 
   it('sets known v2 skill ids separately from v1 packs', async () => {
     process.env.ADMIN_SECRET = 'test-secret'
+    db.query.mockResolvedValueOnce({ rows: [{ id: 'v2-test-skill', name: 'V2 Test Skill', content: '# V2 Test Skill', status: 'active' }] })
     db.query.mockResolvedValueOnce({ rows: [{ email: 'a@b.com', enabled_v2_skills: ['v2-test-skill'] }] })
     const res = await request(app)
       .patch('/auth/admin/users/a@b.com/v2-skills')
@@ -253,6 +254,121 @@ describe('GET /auth/admin/v2/skills/catalog', () => {
     expect(res.status).toBe(200)
     expect(res.body.skills[0].id).toBe('v2-test-skill')
     expect(res.body.skills[0].content).toBeUndefined()
+  })
+})
+
+describe('V2 owner-installed skills', () => {
+  beforeEach(() => {
+    process.env.ADMIN_SECRET = 'test-secret'
+    global.fetch = undefined
+  })
+
+  it('previews pasted SKILL.md content with a Maude summary', async () => {
+    const anthropic = require('../src/anthropic')
+    anthropic.summarizeSkill.mockResolvedValueOnce('Use this skill for focused coaching.')
+    const res = await request(app)
+      .post('/auth/admin/v2/skills/preview')
+      .set('x-admin-secret', 'test-secret')
+      .send({
+        content: `---
+name: Coaching Skill
+description: Helps with coaching.
+version: 1.2.3
+---
+
+# Coaching Skill
+
+Use this skill when coaching.`,
+      })
+    expect(res.status).toBe(200)
+    expect(res.body.skill.id).toBe('coaching-skill')
+    expect(res.body.skill.summary).toBe('Use this skill for focused coaching.')
+  })
+
+  it('rejects empty skill previews', async () => {
+    const res = await request(app)
+      .post('/auth/admin/v2/skills/preview')
+      .set('x-admin-secret', 'test-secret')
+      .send({ content: '' })
+    expect(res.status).toBe(400)
+  })
+
+  it('previews SKILL.md content from a raw URL', async () => {
+    const anthropic = require('../src/anthropic')
+    anthropic.summarizeSkill.mockResolvedValueOnce('Imported from URL.')
+    global.fetch = jest.fn().mockResolvedValueOnce({
+      ok: true,
+      headers: { get: () => 'text/markdown' },
+      text: async () => '# URL Skill\n\nA remote skill.',
+    })
+    const res = await request(app)
+      .post('/auth/admin/v2/skills/preview')
+      .set('x-admin-secret', 'test-secret')
+      .send({ sourceUrl: 'https://example.com/SKILL.md' })
+    expect(res.status).toBe(200)
+    expect(res.body.skill.id).toBe('url-skill')
+    expect(global.fetch).toHaveBeenCalledWith('https://example.com/SKILL.md')
+  })
+
+  it('rejects oversized URL imports', async () => {
+    global.fetch = jest.fn().mockResolvedValueOnce({
+      ok: true,
+      headers: { get: () => 'text/markdown' },
+      text: async () => `# Big Skill\n\n${'x'.repeat(300 * 1024)}`,
+    })
+    const res = await request(app)
+      .post('/auth/admin/v2/skills/preview')
+      .set('x-admin-secret', 'test-secret')
+      .send({ sourceUrl: 'https://example.com/SKILL.md' })
+    expect(res.status).toBe(400)
+    expect(res.body.error).toContain('too large')
+  })
+
+  it('installs or updates a skill by stable id and assigns selected users', async () => {
+    db.query.mockResolvedValueOnce({
+      rows: [{
+        id: 'coaching-skill',
+        name: 'Coaching Skill',
+        description: 'Helps with coaching.',
+        version: '1.0.0',
+        source_url: '',
+        content: '# Coaching Skill\n\nUse this skill.',
+        summary: 'Summary.',
+        status: 'active',
+      }],
+    })
+    db.query.mockResolvedValueOnce({ rows: [] })
+    const res = await request(app)
+      .post('/auth/admin/v2/skills')
+      .set('x-admin-secret', 'test-secret')
+      .send({
+        id: 'coaching-skill',
+        name: 'Coaching Skill',
+        content: '# Coaching Skill\n\nUse this skill.',
+        summary: 'Summary.',
+        assignTo: ['A@B.COM'],
+      })
+    expect(res.status).toBe(200)
+    expect(res.body.skill.id).toBe('coaching-skill')
+    const assignmentCall = db.query.mock.calls.find(call => String(call[0]).includes('array_append(enabled_v2_skills'))
+    expect(assignmentCall[1]).toEqual(['coaching-skill', 'a@b.com'])
+  })
+
+  it('does not return inactive assigned skills to the app', async () => {
+    db.query.mockResolvedValueOnce({ rows: [{ enabled_v2_skills: ['archived-skill'] }] })
+    db.query.mockResolvedValueOnce({
+      rows: [{
+        id: 'archived-skill',
+        name: 'Archived Skill',
+        content: '# Archived Skill',
+        status: 'archived',
+      }],
+    })
+    const res = await request(app)
+      .get('/v2/skills/available')
+      .set('Authorization', `Bearer ${makeToken()}`)
+    expect(res.status).toBe(200)
+    expect(res.body.skills).toEqual([])
   })
 })
 

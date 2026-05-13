@@ -137,7 +137,7 @@ router.patch('/admin/users/:email/v2-skills', async (req, res) => {
   }
   const { skills } = req.body
   if (!Array.isArray(skills)) return res.status(400).json({ error: 'skills must be an array' })
-  const allowedSkillIds = new Set(getSkillCatalog().map(skill => skill.id))
+  const allowedSkillIds = new Set((await getSkillCatalog()).map(skill => skill.id))
   const normalizedSkills = skills.map(skill => String(skill).trim()).filter(Boolean)
   const unknownSkill = normalizedSkills.find(skill => !allowedSkillIds.has(skill))
   if (unknownSkill) return res.status(400).json({ error: `Unknown v2 skill: ${unknownSkill}` })

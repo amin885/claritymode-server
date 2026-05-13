@@ -77,4 +77,25 @@ async function summarize(messages) {
   return response.content[0]?.text || null
 }
 
-module.exports = { streamToResponse, summarize }
+async function summarizeSkill(skill) {
+  const response = await getClient().messages.create({
+    model: MODEL,
+    max_tokens: 512,
+    messages: [{
+      role: 'user',
+      content: [
+        'Summarize this ClarityMode SKILL.md for the owner before installation.',
+        'Use plain language. Include: what it helps with, when to use it, and limits/safety notes.',
+        'Keep it concise and friendly.',
+        '',
+        `Name: ${skill.name || skill.id}`,
+        `Description: ${skill.description || 'None'}`,
+        '',
+        skill.content || '',
+      ].join('\n'),
+    }],
+  })
+  return response.content[0]?.text || null
+}
+
+module.exports = { streamToResponse, summarize, summarizeSkill }
