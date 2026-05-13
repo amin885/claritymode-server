@@ -64,10 +64,10 @@
       class="w-full px-3 py-2 rounded-xl border border-stone-200 text-sm focus:outline-none focus:border-stone-400"></textarea>
     <div class="flex flex-wrap gap-2">
       <button onclick="previewSkill()" class="px-4 py-2 rounded-xl bg-stone-800 text-white text-sm font-medium hover:bg-stone-700 transition-colors">
-        Preview Skill
+        Review Skill
       </button>
       <button onclick="installPreviewedSkill()" id="install-skill-button" disabled class="px-4 py-2 rounded-xl border border-stone-200 text-stone-400 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50 hover:border-stone-300 transition-colors">
-        Install Preview
+        Install Skill
       </button>
     </div>
     <p id="skill-import-msg" class="text-xs hidden"></p>
@@ -177,9 +177,9 @@
           </p>
         </div>
         <div class="flex gap-2 shrink-0">
-          <button onclick="toggleApproved('${u.email}', ${u.is_approved})" class="px-3 py-1.5 rounded-lg border text-xs transition-colors ${u.is_approved ? 'border-stone-200 text-stone-500 hover:text-red-500 hover:border-red-200' : 'border-green-200 text-green-600 hover:bg-green-50'}">${u.is_approved ? 'Suspend' : 'Approve'}</button>
-          <button onclick="openResetModal('${u.email}')" class="px-3 py-1.5 rounded-lg border border-stone-200 text-stone-500 text-xs hover:border-stone-300 hover:text-stone-700 transition-colors">Reset password</button>
-          <button onclick="openSkillsModal('${u.email}', ${JSON.stringify(u.enabled_v2_skills || [])})" class="px-3 py-1.5 rounded-lg border border-stone-200 text-stone-500 text-xs hover:border-stone-300 hover:text-stone-700 transition-colors">Edit V2 skills</button>
+          <button onclick="toggleApproved('${escapeJs(u.email)}', ${u.is_approved})" class="px-3 py-1.5 rounded-lg border text-xs transition-colors ${u.is_approved ? 'border-stone-200 text-stone-500 hover:text-red-500 hover:border-red-200' : 'border-green-200 text-green-600 hover:bg-green-50'}">${u.is_approved ? 'Suspend' : 'Approve'}</button>
+          <button onclick="openResetModal('${escapeJs(u.email)}')" class="px-3 py-1.5 rounded-lg border border-stone-200 text-stone-500 text-xs hover:border-stone-300 hover:text-stone-700 transition-colors">Reset password</button>
+          <button onclick="openSkillsModal('${escapeJs(u.email)}')" class="px-3 py-1.5 rounded-lg border border-stone-200 text-stone-500 text-xs hover:border-stone-300 hover:text-stone-700 transition-colors">Edit V2 skills</button>
         </div>
       </div>
     `).join('')
@@ -273,7 +273,7 @@
     })
     const data = await res.json()
     if (res.ok) {
-      msg.textContent = `Installed ${data.skill.name || data.skill.id}.`
+      msg.textContent = `${data.skill.name || data.skill.id} installed and assigned to selected users.`
       msg.className = 'text-xs text-green-600'
       document.getElementById('install-skill-button').disabled = true
       previewedSkill = null
@@ -352,7 +352,9 @@
     }
   }
 
-  function openSkillsModal(email, currentSkills) {
+  function openSkillsModal(email) {
+    const user = currentUsers.find(candidate => candidate.email === email)
+    const currentSkills = Array.isArray(user?.enabled_v2_skills) ? user.enabled_v2_skills : []
     skillsTarget = email
     document.getElementById('skills-email-label').textContent = email
     document.getElementById('skills-msg').classList.add('hidden')
@@ -400,6 +402,14 @@
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#039;')
+  }
+
+  function escapeJs(value) {
+    return String(value || '')
+      .replace(/\\/g, '\\\\')
+      .replace(/'/g, "\\'")
+      .replace(/\n/g, '\\n')
+      .replace(/\r/g, '\\r')
   }
 
   document.addEventListener('keydown', e => {
