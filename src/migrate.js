@@ -28,6 +28,7 @@ async function migrate() {
       updated_at  TIMESTAMPTZ DEFAULT now()
     )
   `)
+  await db.query(`ALTER TABLE v2_skills ADD COLUMN IF NOT EXISTS data_source TEXT NOT NULL DEFAULT ''`)
   console.log('Migration complete.')
   process.exit(0)
 }

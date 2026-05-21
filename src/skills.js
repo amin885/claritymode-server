@@ -7,7 +7,7 @@ const MAX_SKILL_BYTES = 256 * 1024
 async function getSkillCatalog() {
   try {
     const result = await db.query(`
-      SELECT id, name, description, version, source_url, content, summary, status, created_at, updated_at
+      SELECT id, name, description, version, source_url, data_source, content, summary, status, created_at, updated_at
       FROM v2_skills
       WHERE status = 'active'
       ORDER BY name ASC
@@ -35,6 +35,7 @@ function normalizeCatalog(skills) {
       description: String(skill.description || '').trim(),
       version: String(skill.version || '').trim(),
       sourceUrl: String(skill.sourceUrl || skill.source_url || '').trim(),
+      dataSource: String(skill.dataSource || skill.data_source || '').trim() || undefined,
       appliesTo: Array.isArray(skill.appliesTo) ? skill.appliesTo.map(String) : ['skill'],
       content: String(skill.content || '').trim(),
       summary: String(skill.summary || '').trim(),
@@ -90,6 +91,7 @@ async function installSkill(input = {}) {
     description: String(input.description || '').trim(),
     version: String(input.version || '').trim(),
     sourceUrl: String(input.sourceUrl || input.source_url || '').trim(),
+    dataSource: String(input.dataSource || input.data_source || '').trim(),
     content: String(input.content || '').trim(),
     summary: String(input.summary || '').trim(),
   }
@@ -102,7 +104,7 @@ async function installSkill(input = {}) {
   if (!skill.summary) skill.summary = await summarizeSkill(skill)
 
   const result = await db.query(
-    `INSERT INTO v2_skills (id, name, description, version, source_url, content, summary, status, updated_at)
+    `INSERT INTO v2_skills (id, name, description, version, source_url, data_source, content, summary, status, updated_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', now())
      ON CONFLICT (id) DO UPDATE SET
        name = EXCLUDED.name,
@@ -113,8 +115,8 @@ async function installSkill(input = {}) {
        summary = EXCLUDED.summary,
        status = 'active',
        updated_at = now()
-     RETURNING id, name, description, version, source_url, content, summary, status, created_at, updated_at`,
-    [skill.id, skill.name, skill.description, skill.version, skill.sourceUrl, skill.content, skill.summary],
+     RETURNING id, name, description, version, source_url, data_source, content, summary, status, created_at, updated_at`,
+    [skill.id, skill.name, skill.description, skill.version, skill.sourceUrl, String(skill.dataSource || '').trim(), skill.content, skill.summary],
   )
   return normalizeCatalog(result.rows)[0]
 }
