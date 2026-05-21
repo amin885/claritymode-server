@@ -105,12 +105,13 @@ async function installSkill(input = {}) {
 
   const result = await db.query(
     `INSERT INTO v2_skills (id, name, description, version, source_url, data_source, content, summary, status, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', now())
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active', now())
      ON CONFLICT (id) DO UPDATE SET
        name = EXCLUDED.name,
        description = EXCLUDED.description,
        version = EXCLUDED.version,
        source_url = EXCLUDED.source_url,
+       data_source = EXCLUDED.data_source,
        content = EXCLUDED.content,
        summary = EXCLUDED.summary,
        status = 'active',
