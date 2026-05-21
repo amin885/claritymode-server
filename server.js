@@ -46,6 +46,7 @@ if (require.main === module) {
         updated_at TIMESTAMPTZ DEFAULT now()
       )
     `))
+    .then(() => db.query('ALTER TABLE v2_skills ADD COLUMN IF NOT EXISTS data_source TEXT NOT NULL DEFAULT ' + "''" ))
     .then(() => console.log('Database ready.'))
     .catch(err => console.error('Migration warning:', JSON.stringify(err), err.message, err.code))
     .finally(() => {
