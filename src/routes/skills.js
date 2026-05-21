@@ -73,8 +73,7 @@ router.post('/auth/admin/v2/skills', async (req, res) => {
     const { content, ...metadata } = skill
     res.json({ ok: true, skill: metadata })
   } catch (err) {
-    res.status(err.status || 500).json({ error: JSON.stringify({ message: err.message, code: err.code, detail: err.detail, stack: err.stack?.split('
-').slice(0,3) }) })
+    res.status(err.status || 500).json({ error: err.message || String(err) })
   }
 })
 
