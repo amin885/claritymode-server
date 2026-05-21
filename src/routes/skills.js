@@ -73,7 +73,7 @@ router.post('/auth/admin/v2/skills', async (req, res) => {
     const { content, ...metadata } = skill
     res.json({ ok: true, skill: metadata })
   } catch (err) {
-    res.status(err.status || 500).json({ error: err.status ? err.message : 'Failed to install skill' })
+    res.status(err.status || 500).json({ error: err.message || 'Failed to install skill' })
   }
 })
 
