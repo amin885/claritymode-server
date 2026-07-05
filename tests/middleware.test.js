@@ -1,5 +1,6 @@
 process.env.JWT_SECRET = 'test-secret-for-jest-only'
 jest.mock('../src/db')
+const db = require('../src/db')
 const request = require('supertest')
 const express = require('express')
 const requireAuth = require('../src/middleware/requireAuth')
@@ -13,6 +14,8 @@ function makeToken(payload = { sub: 'id-1', email: 'a@b.com' }) {
 }
 
 describe('requireAuth', () => {
+  beforeEach(() => db.query.mockReset())
+
   it('rejects requests with no Authorization header', async () => {
     const res = await request(app).get('/protected')
     expect(res.status).toBe(401)
@@ -25,9 +28,24 @@ describe('requireAuth', () => {
 
   it('allows requests with a valid token and attaches user', async () => {
     const token = makeToken()
+    db.query.mockResolvedValueOnce({ rows: [{ id: 'id-1', email: 'a@b.com', is_approved: true }] })
     const res = await request(app).get('/protected').set('Authorization', `Bearer ${token}`)
     expect(res.status).toBe(200)
     expect(res.body.user.email).toBe('a@b.com')
+  })
+
+  it('rejects requests when the token user is suspended', async () => {
+    const token = makeToken()
+    db.query.mockResolvedValueOnce({ rows: [{ id: 'id-1', email: 'a@b.com', is_approved: false }] })
+    const res = await request(app).get('/protected').set('Authorization', `Bearer ${token}`)
+    expect(res.status).toBe(403)
+  })
+
+  it('rejects requests when the token user no longer exists', async () => {
+    const token = makeToken()
+    db.query.mockResolvedValueOnce({ rows: [] })
+    const res = await request(app).get('/protected').set('Authorization', `Bearer ${token}`)
+    expect(res.status).toBe(401)
   })
 
   it('rejects requests with an expired token', async () => {

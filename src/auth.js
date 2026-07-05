@@ -63,4 +63,22 @@ function verifyToken(token) {
   return jwt.verify(token, process.env.JWT_SECRET)
 }
 
-module.exports = { createUser, login, changePassword, resetPassword, verifyToken }
+async function authenticateToken(token) {
+  let payload
+  try {
+    payload = verifyToken(token)
+  } catch {
+    throw Object.assign(new Error('Invalid or expired token'), { status: 401 })
+  }
+
+  const result = await db.query(
+    'SELECT id, email, is_approved FROM users WHERE id = $1',
+    [payload.sub]
+  )
+  const user = result.rows[0]
+  if (!user) throw Object.assign(new Error('Invalid or expired token'), { status: 401 })
+  if (!user.is_approved) throw Object.assign(new Error('Account not authorized'), { status: 403 })
+  return { ...payload, sub: user.id, email: user.email }
+}
+
+module.exports = { createUser, login, changePassword, resetPassword, verifyToken, authenticateToken }

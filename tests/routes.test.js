@@ -54,6 +54,10 @@ function makeToken() {
   return jwt.sign({ sub: 'user-1', email: 'a@b.com' }, process.env.JWT_SECRET)
 }
 
+function mockApprovedUser() {
+  db.query.mockResolvedValueOnce({ rows: [{ id: 'user-1', email: 'a@b.com', is_approved: true }] })
+}
+
 describe('GET /auth/admin/users', () => {
   it('returns 401 without admin secret', async () => {
     const res = await request(app).get('/auth/admin/users')
@@ -170,6 +174,7 @@ describe('POST /auth/change-password', () => {
   })
 
   it('returns 400 when fields missing', async () => {
+    mockApprovedUser()
     const res = await request(app)
       .post('/auth/change-password')
       .set('Authorization', `Bearer ${makeToken()}`)
@@ -179,6 +184,7 @@ describe('POST /auth/change-password', () => {
 
   it('returns 401 for wrong current password', async () => {
     const hash = await bcrypt.hash('correct1', 1)
+    mockApprovedUser()
     db.query.mockResolvedValueOnce({ rows: [{ id: 'uuid-cp1', password_hash: hash }] })
     const res = await request(app)
       .post('/auth/change-password')
@@ -189,6 +195,7 @@ describe('POST /auth/change-password', () => {
 
   it('returns ok for valid change', async () => {
     const hash = await bcrypt.hash('oldpass1', 1)
+    mockApprovedUser()
     db.query.mockResolvedValueOnce({ rows: [{ id: 'uuid-cp2', password_hash: hash }] })
     db.query.mockResolvedValueOnce({ rows: [] })
     const res = await request(app)
@@ -207,6 +214,7 @@ describe('GET /v2/skills/available', () => {
   })
 
   it('returns only skills enabled for the logged-in user', async () => {
+    mockApprovedUser()
     db.query.mockResolvedValueOnce({ rows: [{ enabled_v2_skills: ['v2-test-skill'] }] })
     const res = await request(app)
       .get('/v2/skills/available')
@@ -218,6 +226,7 @@ describe('GET /v2/skills/available', () => {
   })
 
   it('hides skills not assigned to the logged-in user', async () => {
+    mockApprovedUser()
     db.query.mockResolvedValueOnce({ rows: [{ enabled_v2_skills: [] }] })
     const res = await request(app)
       .get('/v2/skills/available')
@@ -355,6 +364,7 @@ Use this skill when coaching.`,
   })
 
   it('does not return inactive assigned skills to the app', async () => {
+    mockApprovedUser()
     db.query.mockResolvedValueOnce({ rows: [{ enabled_v2_skills: ['archived-skill'] }] })
     db.query.mockResolvedValueOnce({
       rows: [{
@@ -379,6 +389,7 @@ describe('POST /chat/stream', () => {
   })
 
   it('returns 400 when messages missing', async () => {
+    mockApprovedUser()
     const res = await request(app)
       .post('/chat/stream')
       .set('Authorization', `Bearer ${makeToken()}`)
@@ -396,6 +407,7 @@ describe('POST /chat/summarize', () => {
   it('returns summary for valid request', async () => {
     const anthropic = require('../src/anthropic')
     anthropic.summarize.mockResolvedValueOnce('A summary.')
+    mockApprovedUser()
     const res = await request(app)
       .post('/chat/summarize')
       .set('Authorization', `Bearer ${makeToken()}`)

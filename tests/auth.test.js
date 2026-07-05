@@ -1,6 +1,6 @@
 jest.mock('../src/db')
 const db = require('../src/db')
-const { createUser, login, changePassword, resetPassword, verifyToken } = require('../src/auth')
+const { createUser, login, changePassword, resetPassword, verifyToken, authenticateToken } = require('../src/auth')
 
 process.env.JWT_SECRET = 'test-secret-for-jest-only'
 
@@ -117,5 +117,34 @@ describe('verifyToken', () => {
 
   it('throws for a bad token', () => {
     expect(() => verifyToken('not.a.token')).toThrow()
+  })
+})
+
+describe('authenticateToken', () => {
+  it('returns the current approved user from the database', async () => {
+    const jwt = require('jsonwebtoken')
+    const signed = jwt.sign({ sub: 'uuid-approved', email: 'old@b.com' }, process.env.JWT_SECRET)
+    db.query.mockResolvedValueOnce({ rows: [{ id: 'uuid-approved', email: 'a@b.com', is_approved: true }] })
+
+    const user = await authenticateToken(signed)
+
+    expect(user.sub).toBe('uuid-approved')
+    expect(user.email).toBe('a@b.com')
+  })
+
+  it('throws 403 for a suspended user token', async () => {
+    const jwt = require('jsonwebtoken')
+    const signed = jwt.sign({ sub: 'uuid-suspended', email: 'a@b.com' }, process.env.JWT_SECRET)
+    db.query.mockResolvedValueOnce({ rows: [{ id: 'uuid-suspended', email: 'a@b.com', is_approved: false }] })
+
+    await expect(authenticateToken(signed)).rejects.toMatchObject({ status: 403 })
+  })
+
+  it('throws 401 when the token user no longer exists', async () => {
+    const jwt = require('jsonwebtoken')
+    const signed = jwt.sign({ sub: 'uuid-missing', email: 'a@b.com' }, process.env.JWT_SECRET)
+    db.query.mockResolvedValueOnce({ rows: [] })
+
+    await expect(authenticateToken(signed)).rejects.toMatchObject({ status: 401 })
   })
 })
