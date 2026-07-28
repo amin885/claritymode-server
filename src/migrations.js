@@ -135,6 +135,17 @@ const migrations = [
         ON shared_project_events (project_id, cursor)`,
     ],
   },
+  {
+    version: 4,
+    name: 'shared-project-targeted-events',
+    statements: [
+      `ALTER TABLE shared_project_events
+        ADD COLUMN IF NOT EXISTS target_user_id UUID REFERENCES users(id)`,
+      `CREATE INDEX IF NOT EXISTS shared_project_events_target_cursor
+        ON shared_project_events (target_user_id, cursor)
+        WHERE target_user_id IS NOT NULL`,
+    ],
+  },
 ]
 
 async function runMigrations(db) {

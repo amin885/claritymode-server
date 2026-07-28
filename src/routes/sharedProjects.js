@@ -80,14 +80,15 @@ async function loadMembership(client, projectId, userId, { ownerOnly = false, lo
 async function loadEvents(userId, after) {
   const result = await db.query(
     `WITH accessible_events AS (
-       SELECT e.cursor, e.project_id, e.revision, e.kind, e.created_at,
+       SELECT e.cursor, e.project_id, e.revision, e.kind, e.target_user_id, e.created_at,
               max(e.cursor) OVER () AS feed_cursor
          FROM shared_project_events e
-         JOIN shared_project_members m ON m.project_id = e.project_id
-        WHERE m.user_id = $1 AND m.removed_at IS NULL AND e.cursor > $2
+         LEFT JOIN shared_project_members m
+           ON m.project_id = e.project_id AND m.user_id = $1 AND m.removed_at IS NULL
+        WHERE (m.user_id IS NOT NULL OR e.target_user_id = $1) AND e.cursor > $2
      )
      SELECT DISTINCT ON (project_id)
-            cursor, project_id, revision, kind, created_at, feed_cursor
+            cursor, project_id, revision, kind, target_user_id, created_at, feed_cursor
        FROM accessible_events
       ORDER BY project_id, cursor DESC`,
     [userId, after]
@@ -100,10 +101,32 @@ async function loadEvents(userId, after) {
         projectId: row.project_id,
         revision: Number(row.revision),
         kind: row.kind,
+        targetUserId: row.target_user_id || undefined,
         createdAt: row.created_at,
       }))
       .sort((left, right) => left.cursor - right.cursor),
   }
+}
+
+async function recordEvent(client, { projectId, revision, kind, targetUserId = null }) {
+  const eventResult = await client.query(
+    `INSERT INTO shared_project_events (project_id, revision, kind, target_user_id)
+     VALUES ($1, $2, $3, $4)
+     RETURNING cursor`,
+    [projectId, revision, kind, targetUserId]
+  )
+  const event = {
+    cursor: Number(eventResult.rows[0].cursor),
+    projectId,
+    revision: Number(revision || 0),
+    kind,
+    ...(targetUserId ? { targetUserId } : {}),
+  }
+  await client.query(
+    `SELECT pg_notify('claritymode_shared_project_change', $1)`,
+    [JSON.stringify(event)]
+  )
+  return event
 }
 
 router.get('/events', async (req, res) => {
@@ -513,21 +536,11 @@ router.post('/:projectId/operations', async (req, res) => {
         WHERE id = $4`,
       [revision, snapshot, String(snapshot.title || '').trim(), project.id]
     )
-    const eventResult = await client.query(
-      `INSERT INTO shared_project_events (project_id, revision, kind)
-       VALUES ($1, $2, $3)
-       RETURNING cursor`,
-      [project.id, revision, kind.trim()]
-    )
-    await client.query(
-      `SELECT pg_notify('claritymode_shared_project_change', $1)`,
-      [JSON.stringify({
-        cursor: Number(eventResult.rows[0].cursor),
-        projectId: project.id,
-        revision,
-        kind: kind.trim(),
-      })]
-    )
+    const event = await recordEvent(client, {
+      projectId: project.id,
+      revision,
+      kind: kind.trim(),
+    })
     if (revision % 25 === 0) {
       await client.query(
         `INSERT INTO shared_project_snapshots (project_id, revision, snapshot)
@@ -539,7 +552,7 @@ router.post('/:projectId/operations', async (req, res) => {
     res.status(201).json({
       ok: true,
       revision,
-      cursor: Number(eventResult.rows[0].cursor),
+      cursor: event.cursor,
       operation: { id: operationResult.rows[0].id, createdAt: operationResult.rows[0].created_at },
     })
   } catch {
@@ -566,6 +579,14 @@ router.delete('/:projectId/members/:userId', async (req, res) => {
         RETURNING user_id`,
       [project.id, req.params.userId]
     )
+    if (result.rows[0]) {
+      await recordEvent(client, {
+        projectId: project.id,
+        revision: Number(project.revision || 0),
+        kind: 'membership.removed',
+        targetUserId: result.rows[0].user_id,
+      })
+    }
     await client.query('COMMIT')
     if (!result.rows[0]) return res.status(404).json({ error: 'Member not found' })
     res.json({ ok: true })
@@ -578,17 +599,37 @@ router.delete('/:projectId/members/:userId', async (req, res) => {
 })
 
 router.post('/:projectId/leave', async (req, res) => {
+  const client = await db.connect()
   try {
-    const result = await db.query(
+    await client.query('BEGIN')
+    const project = await loadMembership(client, req.params.projectId, req.user.sub, { lock: true })
+    if (!project || project.role === 'owner') {
+      await client.query('ROLLBACK')
+      return res.status(400).json({ error: 'Owners cannot leave a shared project' })
+    }
+    const result = await client.query(
       `UPDATE shared_project_members SET removed_at = now()
         WHERE project_id = $1 AND user_id = $2 AND role = 'member' AND removed_at IS NULL
         RETURNING project_id`,
       [req.params.projectId, req.user.sub]
     )
-    if (!result.rows[0]) return res.status(400).json({ error: 'Owners cannot leave a shared project' })
+    if (!result.rows[0]) {
+      await client.query('ROLLBACK')
+      return res.status(400).json({ error: 'Shared project could not be left' })
+    }
+    await recordEvent(client, {
+      projectId: project.id,
+      revision: Number(project.revision || 0),
+      kind: 'membership.left',
+      targetUserId: req.user.sub,
+    })
+    await client.query('COMMIT')
     res.json({ ok: true })
   } catch {
+    await client.query('ROLLBACK')
     res.status(500).json({ error: 'Shared project could not be left' })
+  } finally {
+    client.release()
   }
 })
 
@@ -601,8 +642,26 @@ router.post('/:projectId/stop', async (req, res) => {
       await client.query('ROLLBACK')
       return res.status(404).json({ error: 'Shared project not found' })
     }
+    const members = await client.query(
+      `SELECT user_id FROM shared_project_members
+        WHERE project_id = $1 AND role = 'member' AND removed_at IS NULL`,
+      [project.id]
+    )
     await client.query(`UPDATE shared_projects SET status = 'stopped', updated_at = now() WHERE id = $1`, [project.id])
     await client.query(`UPDATE shared_project_members SET removed_at = now() WHERE project_id = $1 AND role = 'member'`, [project.id])
+    await recordEvent(client, {
+      projectId: project.id,
+      revision: Number(project.revision || 0),
+      kind: 'sharing.stopped',
+    })
+    for (const member of members.rows) {
+      await recordEvent(client, {
+        projectId: project.id,
+        revision: Number(project.revision || 0),
+        kind: 'sharing.stopped',
+        targetUserId: member.user_id,
+      })
+    }
     await client.query('COMMIT')
     res.json({ ok: true })
   } catch {

@@ -348,3 +348,24 @@ describe('revisioned shared project operations', () => {
     expect(client.query).toHaveBeenLastCalledWith('COMMIT')
   })
 })
+
+describe('shared project lifecycle notifications', () => {
+  test('notifies a removed member through a targeted durable event', async () => {
+    authenticate()
+    const client = mockClient([
+      { rows: [] },
+      { rows: [{ id: 'project-1', role: 'owner', revision: '7', status: 'active' }] },
+      { rows: [{ user_id: 'user-2' }] },
+      { rows: [{ cursor: '21' }] },
+      { rows: [] },
+      { rows: [] },
+    ])
+    const response = await request(app)
+      .delete('/v2/shared-projects/project-1/members/user-2')
+      .set('Authorization', `Bearer ${token()}`)
+    expect(response.status).toBe(200)
+    const eventInsert = client.query.mock.calls.find(call => String(call[0]).includes('INSERT INTO shared_project_events'))
+    expect(eventInsert[1]).toEqual(['project-1', 7, 'membership.removed', 'user-2'])
+    expect(client.query).toHaveBeenLastCalledWith('COMMIT')
+  })
+})

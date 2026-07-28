@@ -31,6 +31,11 @@ async function deliver(db, event) {
       writeEvent(response, event)
     }
   }
+  if (event.targetUserId) {
+    for (const response of subscribers.get(event.targetUserId) || []) {
+      writeEvent(response, event)
+    }
+  }
 }
 
 async function start(db) {
