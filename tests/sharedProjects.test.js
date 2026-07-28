@@ -127,6 +127,47 @@ describe('shared project creation and invitations', () => {
     expect(client.query).toHaveBeenLastCalledWith('ROLLBACK')
   })
 
+  test('lists pending invitations only after owner membership is verified', async () => {
+    authenticate()
+    db.query.mockResolvedValueOnce({ rows: [{ id: 'project-1', role: 'owner', status: 'active' }] })
+    db.query.mockResolvedValueOnce({
+      rows: [{
+        id: 'invite-1',
+        project_id: 'project-1',
+        invited_email: 'wife@example.com',
+        expires_at: new Date(Date.now() + 60_000),
+        created_at: new Date(),
+      }],
+    })
+    const response = await request(app)
+      .get('/v2/shared-projects/project-1/invitations')
+      .set('Authorization', `Bearer ${token()}`)
+    expect(response.status).toBe(200)
+    expect(response.body.invitations).toEqual([
+      expect.objectContaining({ id: 'invite-1', projectId: 'project-1', invitedEmail: 'wife@example.com' }),
+    ])
+  })
+
+  test('does not list pending invitations for a non-owner', async () => {
+    authenticate('user-2', 'member@example.com')
+    db.query.mockResolvedValueOnce({ rows: [] })
+    const response = await request(app)
+      .get('/v2/shared-projects/project-1/invitations')
+      .set('Authorization', `Bearer ${token('user-2', 'member@example.com')}`)
+    expect(response.status).toBe(404)
+  })
+
+  test('lets only the owner cancel a pending invitation', async () => {
+    authenticate()
+    db.query.mockResolvedValueOnce({ rows: [{ id: 'invite-1' }] })
+    const response = await request(app)
+      .delete('/v2/shared-projects/project-1/invitations/invite-1')
+      .set('Authorization', `Bearer ${token()}`)
+    expect(response.status).toBe(200)
+    expect(response.body).toMatchObject({ ok: true, invitationId: 'invite-1' })
+    expect(db.query.mock.calls[1][0]).toContain("m.role = 'owner'")
+  })
+
   test('accepts an invitation only for the authenticated normalized email', async () => {
     authenticate('user-2', 'wife@example.com')
     const client = mockClient([

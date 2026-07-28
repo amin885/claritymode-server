@@ -52,6 +52,16 @@ function publicProject(row) {
   }
 }
 
+function publicInvitation(row) {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    invitedEmail: row.invited_email,
+    expiresAt: row.expires_at,
+    createdAt: row.created_at,
+  }
+}
+
 async function loadMembership(client, projectId, userId, { ownerOnly = false, lock = false } = {}) {
   const result = await client.query(
     `SELECT p.*, m.role
@@ -152,6 +162,23 @@ router.get('/invitations', async (req, res) => {
   }
 })
 
+router.get('/:projectId/invitations', async (req, res) => {
+  try {
+    const project = await loadMembership(db, req.params.projectId, req.user.sub, { ownerOnly: true })
+    if (!project) return res.status(404).json({ error: 'Shared project not found' })
+    const result = await db.query(
+      `SELECT id, project_id, invited_email, expires_at, created_at
+         FROM shared_project_invitations
+        WHERE project_id = $1 AND status = 'pending' AND expires_at > now()
+        ORDER BY created_at DESC`,
+      [project.id]
+    )
+    res.json({ invitations: result.rows.map(publicInvitation) })
+  } catch {
+    res.status(500).json({ error: 'Pending invitations could not be loaded' })
+  }
+})
+
 router.post('/:projectId/invitations', async (req, res) => {
   const email = normalizeEmail(req.body?.email)
   if (!email || !email.includes('@') || email.length > 320) {
@@ -195,12 +222,34 @@ router.post('/:projectId/invitations', async (req, res) => {
       [project.id, req.user.sub, email, crypto.createHash('sha256').update(crypto.randomBytes(32)).digest('hex'), INVITATION_DAYS]
     )
     await client.query('COMMIT')
-    res.status(201).json({ invitation: invitationResult.rows[0] })
+    res.status(201).json({ invitation: publicInvitation(invitationResult.rows[0]) })
   } catch {
     await client.query('ROLLBACK')
     res.status(500).json({ error: 'Invitation could not be created' })
   } finally {
     client.release()
+  }
+})
+
+router.delete('/:projectId/invitations/:invitationId', async (req, res) => {
+  try {
+    const result = await db.query(
+      `UPDATE shared_project_invitations i
+          SET status = 'revoked'
+        WHERE i.id = $1 AND i.project_id = $2 AND i.status = 'pending'
+          AND EXISTS (
+            SELECT 1
+              FROM shared_project_members m
+             WHERE m.project_id = i.project_id AND m.user_id = $3
+               AND m.role = 'owner' AND m.removed_at IS NULL
+          )
+        RETURNING i.id`,
+      [req.params.invitationId, req.params.projectId, req.user.sub]
+    )
+    if (!result.rows[0]) return res.status(404).json({ error: 'Pending invitation not found' })
+    res.json({ ok: true, invitationId: result.rows[0].id })
+  } catch {
+    res.status(500).json({ error: 'Invitation could not be canceled' })
   }
 })
 
