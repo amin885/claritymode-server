@@ -120,6 +120,21 @@ const migrations = [
       )`,
     ],
   },
+  {
+    version: 3,
+    name: 'shared-project-change-feed',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS shared_project_events (
+        cursor BIGSERIAL PRIMARY KEY,
+        project_id UUID NOT NULL REFERENCES shared_projects(id) ON DELETE CASCADE,
+        revision BIGINT NOT NULL,
+        kind TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )`,
+      `CREATE INDEX IF NOT EXISTS shared_project_events_project_cursor
+        ON shared_project_events (project_id, cursor)`,
+    ],
+  },
 ]
 
 async function runMigrations(db) {

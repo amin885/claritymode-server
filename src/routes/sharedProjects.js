@@ -2,6 +2,7 @@ const crypto = require('crypto')
 const express = require('express')
 const db = require('../db')
 const requireAuth = require('../middleware/requireAuth')
+const sharedProjectEvents = require('../sharedProjectEvents')
 
 const router = express.Router()
 const MAX_SNAPSHOT_BYTES = 1024 * 1024
@@ -75,6 +76,72 @@ async function loadMembership(client, projectId, userId, { ownerOnly = false, lo
   )
   return result.rows[0] || null
 }
+
+async function loadEvents(userId, after) {
+  const result = await db.query(
+    `WITH accessible_events AS (
+       SELECT e.cursor, e.project_id, e.revision, e.kind, e.created_at,
+              max(e.cursor) OVER () AS feed_cursor
+         FROM shared_project_events e
+         JOIN shared_project_members m ON m.project_id = e.project_id
+        WHERE m.user_id = $1 AND m.removed_at IS NULL AND e.cursor > $2
+     )
+     SELECT DISTINCT ON (project_id)
+            cursor, project_id, revision, kind, created_at, feed_cursor
+       FROM accessible_events
+      ORDER BY project_id, cursor DESC`,
+    [userId, after]
+  )
+  return {
+    cursor: Number(result.rows[0]?.feed_cursor || after),
+    events: result.rows
+      .map(row => ({
+        cursor: Number(row.cursor),
+        projectId: row.project_id,
+        revision: Number(row.revision),
+        kind: row.kind,
+        createdAt: row.created_at,
+      }))
+      .sort((left, right) => left.cursor - right.cursor),
+  }
+}
+
+router.get('/events', async (req, res) => {
+  const after = Math.max(0, Number(req.query.after || 0))
+  if (!Number.isSafeInteger(after)) return res.status(400).json({ error: 'Invalid event cursor' })
+  try {
+    const feed = await loadEvents(req.user.sub, after)
+    res.json(feed)
+  } catch {
+    res.status(500).json({ error: 'Shared-project changes could not be checked' })
+  }
+})
+
+router.get('/stream', async (req, res) => {
+  const after = Math.max(0, Number(req.query.after || req.get('Last-Event-ID') || 0))
+  if (!Number.isSafeInteger(after)) return res.status(400).json({ error: 'Invalid event cursor' })
+  res.status(200)
+  res.set({
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  })
+  res.flushHeaders?.()
+  res.write('retry: 3000\n\n')
+  const unsubscribe = sharedProjectEvents.subscribe(req.user.sub, res)
+  try {
+    const feed = await loadEvents(req.user.sub, after)
+    for (const event of feed.events) sharedProjectEvents.writeEvent(res, event)
+  } catch {
+    res.write('event: stream-error\ndata: {}\n\n')
+  }
+  const heartbeat = setInterval(() => res.write(': keepalive\n\n'), 20_000)
+  req.on('close', () => {
+    clearInterval(heartbeat)
+    unsubscribe()
+  })
+})
 
 router.get('/', async (req, res) => {
   try {
@@ -446,6 +513,21 @@ router.post('/:projectId/operations', async (req, res) => {
         WHERE id = $4`,
       [revision, snapshot, String(snapshot.title || '').trim(), project.id]
     )
+    const eventResult = await client.query(
+      `INSERT INTO shared_project_events (project_id, revision, kind)
+       VALUES ($1, $2, $3)
+       RETURNING cursor`,
+      [project.id, revision, kind.trim()]
+    )
+    await client.query(
+      `SELECT pg_notify('claritymode_shared_project_change', $1)`,
+      [JSON.stringify({
+        cursor: Number(eventResult.rows[0].cursor),
+        projectId: project.id,
+        revision,
+        kind: kind.trim(),
+      })]
+    )
     if (revision % 25 === 0) {
       await client.query(
         `INSERT INTO shared_project_snapshots (project_id, revision, snapshot)
@@ -457,6 +539,7 @@ router.post('/:projectId/operations', async (req, res) => {
     res.status(201).json({
       ok: true,
       revision,
+      cursor: Number(eventResult.rows[0].cursor),
       operation: { id: operationResult.rows[0].id, createdAt: operationResult.rows[0].created_at },
     })
   } catch {

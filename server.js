@@ -21,10 +21,14 @@ if (require.main === module) {
   const PORT = process.env.PORT || 3000
   const db = require('./src/db')
   const { runMigrations } = require('./src/migrations')
+  const sharedProjectEvents = require('./src/sharedProjectEvents')
   const connString = process.env.POSTGRES_URL || process.env.DATABASE_URL
   console.log('DB connection string set:', !!connString, connString?.slice(0, 20))
   runMigrations(db)
-    .then(() => console.log('Database ready.'))
+    .then(async () => {
+      await sharedProjectEvents.start(db)
+      console.log('Database ready.')
+    })
     .catch(err => console.error('Migration warning:', JSON.stringify(err), err.message, err.code))
     .finally(() => {
       app.listen(PORT, () => console.log(`ClarityMode server running on ${PORT}`))

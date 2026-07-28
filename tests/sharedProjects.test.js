@@ -57,6 +57,29 @@ describe('shared project authorization', () => {
     expect(db.query.mock.calls[1][0]).toContain('m.user_id = $1')
   })
 
+  test('returns one durable cursor feed across all projects the account can access', async () => {
+    authenticate()
+    db.query.mockResolvedValueOnce({
+      rows: [
+        { cursor: '11', project_id: 'project-1', revision: '4', kind: 'task.complete', created_at: new Date(), feed_cursor: '12' },
+        { cursor: '12', project_id: 'project-2', revision: '8', kind: 'task.add', created_at: new Date(), feed_cursor: '12' },
+      ],
+    })
+    const response = await request(app)
+      .get('/v2/shared-projects/events?after=10')
+      .set('Authorization', `Bearer ${token()}`)
+    expect(response.status).toBe(200)
+    expect(response.body).toMatchObject({
+      cursor: 12,
+      events: [
+        { cursor: 11, projectId: 'project-1', revision: 4 },
+        { cursor: 12, projectId: 'project-2', revision: 8 },
+      ],
+    })
+    expect(db.query.mock.calls[1][0]).toContain('m.user_id = $1')
+    expect(db.query.mock.calls[1][1]).toEqual(['user-1', 10])
+  })
+
   test('does not reveal whether an unshared project exists', async () => {
     authenticate('user-2', 'member@example.com')
     db.query.mockResolvedValueOnce({ rows: [] })
@@ -311,6 +334,8 @@ describe('revisioned shared project operations', () => {
       { rows: [] },
       { rows: [{ id: 'change-1', created_at: new Date() }] },
       { rows: [] },
+      { rows: [{ cursor: '9' }] },
+      { rows: [] },
       { rows: [] },
     ])
     const response = await request(app)
@@ -319,6 +344,7 @@ describe('revisioned shared project operations', () => {
       .send(operation)
     expect(response.status).toBe(201)
     expect(response.body.revision).toBe(3)
+    expect(response.body.cursor).toBe(9)
     expect(client.query).toHaveBeenLastCalledWith('COMMIT')
   })
 })
