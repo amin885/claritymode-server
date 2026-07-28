@@ -65,6 +65,25 @@ describe('shared project authorization', () => {
       .set('Authorization', `Bearer ${token('user-2', 'member@example.com')}`)
     expect(response.status).toBe(404)
   })
+
+  test('returns member identities only after project membership is verified', async () => {
+    authenticate()
+    db.query.mockResolvedValueOnce({ rows: [{ id: 'project-1', role: 'owner', status: 'active' }] })
+    db.query.mockResolvedValueOnce({
+      rows: [
+        { user_id: 'user-1', email: 'owner@example.com', role: 'owner', joined_at: new Date() },
+        { user_id: 'user-2', email: 'wife@example.com', role: 'member', joined_at: new Date() },
+      ],
+    })
+    const response = await request(app)
+      .get('/v2/shared-projects/project-1/members')
+      .set('Authorization', `Bearer ${token()}`)
+    expect(response.status).toBe(200)
+    expect(response.body.members).toEqual([
+      expect.objectContaining({ email: 'owner@example.com', role: 'owner' }),
+      expect.objectContaining({ email: 'wife@example.com', role: 'member' }),
+    ])
+  })
 })
 
 describe('shared project creation and invitations', () => {
