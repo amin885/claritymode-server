@@ -84,6 +84,55 @@ describe('shared project authorization', () => {
       expect.objectContaining({ email: 'wife@example.com', role: 'member' }),
     ])
   })
+
+  test('returns searchable shared history newest first with backward pagination', async () => {
+    authenticate('user-2', 'member@example.com')
+    db.query.mockResolvedValueOnce({ rows: [{ id: 'project-1', role: 'member', status: 'active' }] })
+    db.query.mockResolvedValueOnce({
+      rows: [
+        {
+          id: 'operation-9',
+          revision: '9',
+          actor_user_id: 'user-2',
+          actor_email: 'member@example.com',
+          kind: 'project.snapshot',
+          payload: { changes: [{ type: 'task', change: 'completed', label: 'Pack chairs' }] },
+          created_at: new Date('2026-07-28T12:00:00Z'),
+        },
+        {
+          id: 'operation-8',
+          revision: '8',
+          actor_user_id: 'user-1',
+          actor_email: 'owner@example.com',
+          kind: 'project.snapshot',
+          payload: { changes: [{ type: 'task', change: 'added', label: 'Buy firewood' }] },
+          created_at: new Date('2026-07-28T11:00:00Z'),
+        },
+      ],
+    })
+    const response = await request(app)
+      .get('/v2/shared-projects/project-1/history?beforeRevision=10&limit=1&q=chairs')
+      .set('Authorization', `Bearer ${token('user-2', 'member@example.com')}`)
+
+    expect(response.status).toBe(200)
+    expect(response.body).toMatchObject({
+      hasMore: true,
+      nextBeforeRevision: 9,
+      history: [expect.objectContaining({ revision: 9, actor_email: 'member@example.com' })],
+    })
+    expect(db.query.mock.calls[2][0]).toContain('ORDER BY o.revision DESC')
+    expect(db.query.mock.calls[2][0]).toContain('o.payload::text ILIKE')
+    expect(db.query.mock.calls[2][1]).toEqual(['project-1', 10, 'chairs', 2])
+  })
+
+  test('rejects invalid shared history pagination before querying membership', async () => {
+    authenticate()
+    const response = await request(app)
+      .get('/v2/shared-projects/project-1/history?beforeRevision=0')
+      .set('Authorization', `Bearer ${token()}`)
+    expect(response.status).toBe(400)
+    expect(response.body.error).toBe('Invalid history revision')
+  })
 })
 
 describe('shared project creation and invitations', () => {

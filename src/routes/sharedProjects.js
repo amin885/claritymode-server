@@ -352,6 +352,47 @@ router.get('/:projectId/changes', async (req, res) => {
   }
 })
 
+router.get('/:projectId/history', async (req, res) => {
+  const requestedLimit = Number(req.query.limit || 30)
+  const beforeRevision = req.query.beforeRevision === undefined ? null : Number(req.query.beforeRevision)
+  const query = String(req.query.q || '').trim().slice(0, 100)
+  if (!Number.isSafeInteger(requestedLimit) || requestedLimit < 1) {
+    return res.status(400).json({ error: 'Invalid history limit' })
+  }
+  if (beforeRevision !== null && (!Number.isSafeInteger(beforeRevision) || beforeRevision < 1)) {
+    return res.status(400).json({ error: 'Invalid history revision' })
+  }
+  const limit = Math.min(100, requestedLimit)
+  try {
+    const member = await loadMembership(db, req.params.projectId, req.user.sub)
+    if (!member) return res.status(404).json({ error: 'Shared project not found' })
+    const result = await db.query(
+      `SELECT o.id, o.revision, o.actor_user_id, u.email AS actor_email,
+              o.kind, o.payload, o.created_at
+         FROM shared_project_operations o
+         JOIN users u ON u.id = o.actor_user_id
+        WHERE o.project_id = $1
+          AND ($2::bigint IS NULL OR o.revision < $2)
+          AND ($3::text = ''
+            OR u.email ILIKE ('%' || $3 || '%')
+            OR o.kind ILIKE ('%' || $3 || '%')
+            OR o.payload::text ILIKE ('%' || $3 || '%'))
+        ORDER BY o.revision DESC
+        LIMIT $4`,
+      [req.params.projectId, beforeRevision, query, limit + 1]
+    )
+    const hasMore = result.rows.length > limit
+    const rows = result.rows.slice(0, limit)
+    res.json({
+      history: rows.map(row => ({ ...row, revision: Number(row.revision) })),
+      hasMore,
+      nextBeforeRevision: hasMore && rows.length ? Number(rows.at(-1).revision) : null,
+    })
+  } catch {
+    res.status(500).json({ error: 'Shared project history could not be loaded' })
+  }
+})
+
 router.post('/:projectId/operations', async (req, res) => {
   const { deviceId, operationId, baseRevision, kind, payload, snapshot } = req.body || {}
   if (!validDeviceId(deviceId) || !validDeviceId(operationId)) {
