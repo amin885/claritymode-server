@@ -285,10 +285,12 @@ router.get('/:projectId/changes', async (req, res) => {
     const member = await loadMembership(db, req.params.projectId, req.user.sub)
     if (!member) return res.status(404).json({ error: 'Shared project not found' })
     const result = await db.query(
-      `SELECT id, revision, actor_user_id, device_id, operation_id, base_revision, kind, payload, created_at
-         FROM shared_project_operations
-        WHERE project_id = $1 AND revision > $2
-        ORDER BY revision ASC
+      `SELECT o.id, o.revision, o.actor_user_id, u.email AS actor_email,
+              o.device_id, o.operation_id, o.base_revision, o.kind, o.payload, o.created_at
+         FROM shared_project_operations o
+         JOIN users u ON u.id = o.actor_user_id
+        WHERE o.project_id = $1 AND o.revision > $2
+        ORDER BY o.revision ASC
         LIMIT 500`,
       [req.params.projectId, since]
     )
