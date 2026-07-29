@@ -146,6 +146,19 @@ const migrations = [
         WHERE target_user_id IS NOT NULL`,
     ],
   },
+  {
+    version: 5,
+    name: 'account-preferences',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS user_preferences (
+        user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        revision BIGINT NOT NULL DEFAULT 0,
+        preferences JSONB NOT NULL DEFAULT '{}'::jsonb,
+        updated_by_device_id TEXT NOT NULL DEFAULT '',
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )`,
+    ],
+  },
 ]
 
 async function runMigrations(db) {
