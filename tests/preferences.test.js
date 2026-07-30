@@ -48,6 +48,7 @@ test('merges a whitelisted patch without accepting credentials or paths', async 
     .set('Authorization', `Bearer ${token()}`)
     .send({
       deviceId: 'device-desktop',
+      expectedRevision: 3,
       changes: {
         assistantName: ' Mae ',
         appearanceTheme: 'soft',
@@ -60,6 +61,35 @@ test('merges a whitelisted patch without accepting credentials or paths', async 
   const written = JSON.parse(db.query.mock.calls[1][1][1])
   expect(written).toEqual({ assistantName: 'Mae', appearanceTheme: 'soft' })
   expect(db.query.mock.calls[1][0]).toContain('preferences = user_preferences.preferences || EXCLUDED.preferences')
+  expect(db.query.mock.calls[1][0]).toContain('OR EXISTS (SELECT 1 FROM current)')
+  expect(db.query.mock.calls[1][1][3]).toBe(3)
+})
+
+test('rejects a stale revision with the current preference document', async () => {
+  authenticate()
+  db.query
+    .mockResolvedValueOnce({ rows: [] })
+    .mockResolvedValueOnce({
+      rows: [{
+        revision: '8',
+        preferences: { priorityEmail: { includeBody: true, contacts: [{ email: 'safe@example.com' }] } },
+        updated_by_device_id: 'device-other',
+        updated_at: new Date(),
+      }],
+    })
+  const response = await request(app)
+    .patch('/v2/preferences')
+    .set('Authorization', `Bearer ${token()}`)
+    .send({
+      deviceId: 'device-desktop',
+      expectedRevision: 7,
+      changes: { priorityEmail: { includeBody: true, contacts: [] } },
+    })
+  expect(response.status).toBe(409)
+  expect(response.body).toMatchObject({
+    revision: 8,
+    preferences: { priorityEmail: { contacts: [{ email: 'safe@example.com' }] } },
+  })
 })
 
 test('normalizes portable settings and excludes device credentials', () => {

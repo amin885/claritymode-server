@@ -130,23 +130,58 @@ router.get('/', async (req, res) => {
 router.patch('/', async (req, res) => {
   const deviceId = String(req.body?.deviceId || '')
   if (!validDeviceId(deviceId)) return res.status(400).json({ error: 'A valid device ID is required.' })
+  const expectedRevision = Number(req.body?.expectedRevision)
+  const revisionProtected = Number.isInteger(expectedRevision) && expectedRevision >= 0
   const changes = normalizeChanges(req.body?.changes)
   if (!Object.keys(changes).length) return res.status(400).json({ error: 'No supported preferences were provided.' })
   if (Buffer.byteLength(JSON.stringify(changes), 'utf8') > MAX_PREFERENCES_BYTES) {
     return res.status(413).json({ error: 'Preferences are too large.' })
   }
   try {
-    const result = await db.query(
-      `INSERT INTO user_preferences (user_id, revision, preferences, updated_by_device_id, updated_at)
-       VALUES ($1, 1, $2::jsonb, $3, now())
-       ON CONFLICT (user_id) DO UPDATE SET
-         revision = user_preferences.revision + 1,
-         preferences = user_preferences.preferences || EXCLUDED.preferences,
-         updated_by_device_id = EXCLUDED.updated_by_device_id,
-         updated_at = now()
-       RETURNING revision, preferences, updated_by_device_id, updated_at`,
-      [req.user.sub, JSON.stringify(changes), deviceId]
-    )
+    const result = revisionProtected
+      ? await db.query(
+        `WITH current AS (
+           SELECT 1 FROM user_preferences WHERE user_id = $1
+         )
+         INSERT INTO user_preferences (user_id, revision, preferences, updated_by_device_id, updated_at)
+         SELECT $1, 1, $2::jsonb, $3, now()
+          WHERE $4::bigint = 0 OR EXISTS (SELECT 1 FROM current)
+         ON CONFLICT (user_id) DO UPDATE SET
+           revision = user_preferences.revision + 1,
+           preferences = user_preferences.preferences || EXCLUDED.preferences,
+           updated_by_device_id = EXCLUDED.updated_by_device_id,
+           updated_at = now()
+         WHERE user_preferences.revision = $4::bigint
+         RETURNING revision, preferences, updated_by_device_id, updated_at`,
+        [req.user.sub, JSON.stringify(changes), deviceId, expectedRevision]
+      )
+      : await db.query(
+        `INSERT INTO user_preferences (user_id, revision, preferences, updated_by_device_id, updated_at)
+         VALUES ($1, 1, $2::jsonb, $3, now())
+         ON CONFLICT (user_id) DO UPDATE SET
+           revision = user_preferences.revision + 1,
+           preferences = user_preferences.preferences || EXCLUDED.preferences,
+           updated_by_device_id = EXCLUDED.updated_by_device_id,
+           updated_at = now()
+         RETURNING revision, preferences, updated_by_device_id, updated_at`,
+        [req.user.sub, JSON.stringify(changes), deviceId]
+      )
+    if (!result.rows[0] && revisionProtected) {
+      const current = await db.query(
+        `SELECT revision, preferences, updated_by_device_id, updated_at
+           FROM user_preferences
+          WHERE user_id = $1`,
+        [req.user.sub]
+      )
+      const row = current.rows[0]
+      return res.status(409).json({
+        error: 'Preferences changed on another device.',
+        revision: Number(row?.revision || 0),
+        preferences: row?.preferences || {},
+        updatedByDeviceId: row?.updated_by_device_id || '',
+        updatedAt: row?.updated_at || null,
+      })
+    }
     const row = result.rows[0]
     res.json({
       revision: Number(row.revision),
