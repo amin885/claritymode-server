@@ -1,5 +1,11 @@
 const express = require('express')
-const { createUser, login, changePassword } = require('../auth')
+const {
+  createUser,
+  login,
+  refreshTrustedSession,
+  revokeTrustedSession,
+  changePassword,
+} = require('../auth')
 const requireAuth = require('../middleware/requireAuth')
 const { getSkillCatalog } = require('../skills')
 
@@ -11,13 +17,32 @@ router.post('/signup', (req, res) => {
 })
 
 router.post('/login', async (req, res) => {
-  const { email, password } = req.body
+  const { email, password, rememberMe, deviceName } = req.body
   if (!email || !password) return res.status(400).json({ error: 'Email and password required' })
   try {
-    const result = await login(email, password)
+    const result = await login(email, password, { rememberMe: rememberMe === true, deviceName })
     res.json(result)
   } catch (err) {
     res.status(err.status || 500).json({ error: err.status ? err.message : 'Login failed' })
+  }
+})
+
+router.post('/refresh', async (req, res) => {
+  const { refreshToken, deviceName } = req.body
+  if (!refreshToken) return res.status(400).json({ error: 'refreshToken required' })
+  try {
+    res.json(await refreshTrustedSession(refreshToken, deviceName))
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.status ? err.message : 'Could not renew session' })
+  }
+})
+
+router.post('/logout', async (req, res) => {
+  try {
+    await revokeTrustedSession(req.body?.refreshToken)
+    res.json({ ok: true })
+  } catch {
+    res.status(500).json({ error: 'Could not revoke trusted device session' })
   }
 })
 

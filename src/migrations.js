@@ -159,6 +159,26 @@ const migrations = [
       )`,
     ],
   },
+  {
+    version: 6,
+    name: 'trusted-device-sessions',
+    statements: [
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_version INTEGER NOT NULL DEFAULT 0`,
+      `CREATE TABLE IF NOT EXISTS trusted_device_sessions (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        token_hash TEXT UNIQUE NOT NULL,
+        device_name TEXT NOT NULL DEFAULT '',
+        expires_at TIMESTAMPTZ NOT NULL,
+        last_used_at TIMESTAMPTZ,
+        revoked_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )`,
+      `CREATE INDEX IF NOT EXISTS trusted_device_sessions_user
+        ON trusted_device_sessions (user_id, expires_at)
+        WHERE revoked_at IS NULL`,
+    ],
+  },
 ]
 
 async function runMigrations(db) {

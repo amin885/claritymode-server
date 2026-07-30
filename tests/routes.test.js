@@ -40,11 +40,52 @@ describe('POST /auth/login', () => {
     expect(res.body.enabledPacks).toEqual(['podcast'])
   })
 
+  it('returns a trusted-device credential only when Keep me signed in is requested', async () => {
+    const hash = await bcrypt.hash('password123', 1)
+    db.query
+      .mockResolvedValueOnce({ rows: [{ id: 'uuid-remember', email: 'a@b.com', password_hash: hash, is_approved: true }] })
+      .mockResolvedValueOnce({ rows: [] })
+    const res = await request(app).post('/auth/login').send({
+      email: 'a@b.com',
+      password: 'password123',
+      rememberMe: true,
+      deviceName: 'Office PC',
+    })
+    expect(res.status).toBe(200)
+    expect(res.body.refreshToken).toBeTruthy()
+  })
+
   it('returns 401 for wrong password', async () => {
     const hash = await bcrypt.hash('correct', 1)
     db.query.mockResolvedValueOnce({ rows: [{ id: 'uuid-3', email: 'a@b.com', password_hash: hash, is_approved: true, enabled_packs: [] }] })
     const res = await request(app).post('/auth/login').send({ email: 'a@b.com', password: 'wrong' })
     expect(res.status).toBe(401)
+  })
+})
+
+describe('POST /auth/refresh', () => {
+  it('rotates a trusted-device credential', async () => {
+    db.query.mockResolvedValueOnce({
+      rows: [{ id: 'uuid-refresh-route', email: 'a@b.com', enabled_packs: [], enabled_v2_skills: [] }],
+    })
+    const res = await request(app).post('/auth/refresh').send({ refreshToken: 'trusted-token', deviceName: 'Home PC' })
+    expect(res.status).toBe(200)
+    expect(res.body.token).toBeTruthy()
+    expect(res.body.refreshToken).toBeTruthy()
+  })
+
+  it('requires a trusted-device credential', async () => {
+    const res = await request(app).post('/auth/refresh').send({})
+    expect(res.status).toBe(400)
+  })
+})
+
+describe('POST /auth/logout', () => {
+  it('revokes the current trusted-device credential', async () => {
+    db.query.mockResolvedValueOnce({ rows: [] })
+    const res = await request(app).post('/auth/logout').send({ refreshToken: 'trusted-token' })
+    expect(res.status).toBe(200)
+    expect(res.body.ok).toBe(true)
   })
 })
 

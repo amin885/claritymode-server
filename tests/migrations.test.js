@@ -2,12 +2,13 @@ const { migrations, runMigrations } = require('../src/migrations')
 
 describe('numbered database migrations', () => {
   test('contains a durable collaboration migration after the legacy schema', () => {
-    expect(migrations.map(item => item.version)).toEqual([1, 2, 3, 4, 5])
+    expect(migrations.map(item => item.version)).toEqual([1, 2, 3, 4, 5, 6])
     expect(migrations[1].statements.join('\n')).toContain('shared_project_operations')
     expect(migrations[1].statements.join('\n')).toContain('shared_project_conflicts')
     expect(migrations[2].statements.join('\n')).toContain('shared_project_events')
     expect(migrations[3].statements.join('\n')).toContain('target_user_id')
     expect(migrations[4].statements.join('\n')).toContain('user_preferences')
+    expect(migrations[5].statements.join('\n')).toContain('trusted_device_sessions')
   })
 
   test('runs unapplied migrations in one transaction and releases the client', async () => {
