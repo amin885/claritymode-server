@@ -10,6 +10,7 @@ const ALLOWED_KEYS = new Set([
   'appearanceTheme',
   'planning',
   'priorityEmail',
+  'gmailRemoteImageSenders',
   'telegramPreferences',
 ])
 const APPEARANCE_THEMES = new Set(['soft', 'professional', 'editorial-grid', 'modernist-blocks'])
@@ -74,6 +75,19 @@ function normalizeChange(key, value) {
         .map(normalizeContact)
         .filter(Boolean),
     }
+  }
+  if (key === 'gmailRemoteImageSenders') {
+    const entries = value && typeof value === 'object' && !Array.isArray(value) ? Object.entries(value) : []
+    return Object.fromEntries(entries
+      .slice(0, 25)
+      .map(([accountEmail, senders]) => [
+        String(accountEmail || '').trim().toLowerCase(),
+        [...new Set((Array.isArray(senders) ? senders : [])
+          .slice(0, 500)
+          .map(sender => String(sender || '').trim().toLowerCase())
+          .filter(sender => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(sender)))],
+      ])
+      .filter(([accountEmail]) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(accountEmail)))
   }
   if (key === 'telegramPreferences') {
     return {

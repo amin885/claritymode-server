@@ -109,3 +109,16 @@ test('normalizes portable settings and excludes device credentials', () => {
     telegramPreferences: expect.objectContaining({ quietHoursStart: '22:00', quietHoursEnd: '06:30' }),
   }))
 })
+
+test('normalizes exact remote-image sender preferences by Gmail account', () => {
+  expect(normalizeChanges({
+    gmailRemoteImageSenders: {
+      ' WORK@Example.com ': [' Client@Example.com ', 'client@example.com', 'not-an-email'],
+      invalid: ['sender@example.com'],
+    },
+  })).toEqual({
+    gmailRemoteImageSenders: {
+      'work@example.com': ['client@example.com'],
+    },
+  })
+})
