@@ -56,7 +56,7 @@ async function login(email, password, options = {}) {
   const valid = await bcrypt.compare(password, user.password_hash)
   if (!valid) throw Object.assign(new Error('Invalid credentials'), { status: 401 })
   if (!user.is_approved) throw Object.assign(new Error('Account not authorized. Contact Amin to request access.'), { status: 403 })
-  const { token } = signToken({ id: user.id, email: user.email })
+  const { token } = signToken(user)
   const response = {
     token,
     enabledPacks: user.enabled_packs || [],

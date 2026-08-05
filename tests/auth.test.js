@@ -48,6 +48,18 @@ describe('login', () => {
     expect(result.enabledPacks).toEqual([])
   })
 
+  it('signs a fresh login with the account current auth version', async () => {
+    const bcrypt = require('bcryptjs')
+    const hash = await bcrypt.hash('password123', 1)
+    db.query.mockResolvedValueOnce({
+      rows: [{ id: 'uuid-versioned', email: 'a@b.com', password_hash: hash, is_approved: true, auth_version: 3 }],
+    })
+
+    const result = await login('a@b.com', 'password123')
+
+    expect(verifyToken(result.token).av).toBe(3)
+  })
+
   it('creates a revocable trusted-device session only when requested', async () => {
     const bcrypt = require('bcryptjs')
     const hash = await bcrypt.hash('password123', 1)
