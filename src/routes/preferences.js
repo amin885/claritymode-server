@@ -12,6 +12,7 @@ const ALLOWED_KEYS = new Set([
   'priorityEmail',
   'gmailRemoteImageSenders',
   'telegramPreferences',
+  'pinnedProjects',
 ])
 const APPEARANCE_THEMES = new Set(['soft', 'professional', 'editorial-grid', 'modernist-blocks'])
 
@@ -40,6 +41,35 @@ function normalizeContact(contact = {}) {
     enabled: contact.enabled !== false,
     addedAt: String(contact.addedAt || '').slice(0, 40),
   }
+}
+
+function normalizePinnedProjectPath(value) {
+  const normalized = String(value || '').trim().replace(/\\/g, '/').replace(/\.md$/i, '')
+  if (!normalized || normalized.startsWith('/') || /^[a-z]:\//i.test(normalized)) return ''
+  if (normalized.split('/').some(part => !part || part === '.' || part === '..')) return ''
+  return normalized.slice(0, 500)
+}
+
+function normalizePinnedProjects(value) {
+  const entries = Array.isArray(value?.entries) ? value.entries : []
+  const byPath = new Map()
+  for (const entry of entries.slice(0, 2000)) {
+    const path = normalizePinnedProjectPath(entry?.path)
+    if (!path) continue
+    const candidate = {
+      path,
+      pinned: entry?.pinned !== false,
+      changedAt: String(entry?.changedAt || '').slice(0, 40),
+      deviceId: String(entry?.deviceId || '').slice(0, 128),
+    }
+    const current = byPath.get(path)
+    const candidateTime = Date.parse(candidate.changedAt || '') || 0
+    const currentTime = Date.parse(current?.changedAt || '') || 0
+    if (!current || candidateTime > currentTime || (candidateTime === currentTime && candidate.deviceId >= current.deviceId)) {
+      byPath.set(path, candidate)
+    }
+  }
+  return { entries: [...byPath.values()].sort((a, b) => a.path.localeCompare(b.path)) }
 }
 
 function normalizeChange(key, value) {
@@ -106,6 +136,7 @@ function normalizeChange(key, value) {
       quietHoursEnd: clock(value?.quietHoursEnd, '07:00'),
     }
   }
+  if (key === 'pinnedProjects') return normalizePinnedProjects(value)
   return undefined
 }
 

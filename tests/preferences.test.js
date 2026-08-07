@@ -122,3 +122,25 @@ test('normalizes exact remote-image sender preferences by Gmail account', () => 
     },
   })
 })
+
+test('normalizes personal pinned-project change records without accepting device paths', () => {
+  expect(normalizeChanges({
+    pinnedProjects: {
+      entries: [
+        { path: 'Projects/Camping.md', pinned: true, changedAt: '2026-08-07T12:00:00.000Z', deviceId: 'device-one' },
+        { path: 'Projects/Camping', pinned: false, changedAt: '2026-08-07T13:00:00.000Z', deviceId: 'device-two' },
+        { path: 'C:\\Private\\Secret', pinned: true },
+        { path: '../Other vault', pinned: true },
+      ],
+    },
+  })).toEqual({
+    pinnedProjects: {
+      entries: [{
+        path: 'Projects/Camping',
+        pinned: false,
+        changedAt: '2026-08-07T13:00:00.000Z',
+        deviceId: 'device-two',
+      }],
+    },
+  })
+})
