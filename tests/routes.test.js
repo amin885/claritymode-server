@@ -99,6 +99,29 @@ function mockApprovedUser() {
   db.query.mockResolvedValueOnce({ rows: [{ id: 'user-1', email: 'a@b.com', is_approved: true }] })
 }
 
+describe('YouTube Script Producer entitlement boundary', () => {
+  test('does not report the product skill as available without account access', async () => {
+    mockApprovedUser()
+    db.query.mockResolvedValueOnce({ rows: [{ enabled: false }] })
+    const res = await request(app)
+      .get('/v2/product-skills/youtube-script-producer/status')
+      .set('authorization', `Bearer ${makeToken()}`)
+    expect(res.status).toBe(200)
+    expect(res.body).toEqual(expect.objectContaining({ entitled: false, serviceReady: false }))
+  })
+
+  test('blocks execution when the account has not been assigned the skill', async () => {
+    mockApprovedUser()
+    db.query.mockResolvedValueOnce({ rows: [{ enabled: false }] })
+    const res = await request(app)
+      .post('/v2/product-skills/youtube-script-producer/run')
+      .set('authorization', `Bearer ${makeToken()}`)
+      .send({ operation: 'generate_candidates' })
+    expect(res.status).toBe(403)
+    expect(res.body.error).toContain('not enabled')
+  })
+})
+
 describe('GET /auth/admin/users', () => {
   it('returns 401 without admin secret', async () => {
     const res = await request(app).get('/auth/admin/users')

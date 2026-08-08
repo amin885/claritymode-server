@@ -179,6 +179,49 @@ const migrations = [
         WHERE revoked_at IS NULL`,
     ],
   },
+  {
+    version: 7,
+    name: 'youtube-script-producer-product-skill',
+    statements: [
+      `INSERT INTO v2_skills (
+        id,
+        name,
+        description,
+        version,
+        source_url,
+        data_source,
+        content,
+        summary,
+        status,
+        updated_at
+      ) VALUES (
+        'claritymode-youtube-script-producer',
+        'YouTube Script Producer',
+        'Turn an approved video idea into a researched, human-reviewed YouTube script inside a project.',
+        '0.1.0',
+        '',
+        'youtube-script-producer',
+        $skill$# YouTube Script Producer
+
+This is a contained ClarityMode product skill. It is started from a project and is not an Ask skill.
+
+ClarityMode owns the workflow and human approval steps. The user connects their own vidIQ account for read-only YouTube evidence. MindStudio remains a hidden ClarityMode-managed execution service.
+$skill$,
+        'A contained project workflow for topic validation and YouTube script production. Access is assigned per ClarityMode account; users can turn it on or off locally.',
+        'active',
+        now()
+      )
+      ON CONFLICT (id) DO UPDATE SET
+        name = EXCLUDED.name,
+        description = EXCLUDED.description,
+        version = EXCLUDED.version,
+        data_source = EXCLUDED.data_source,
+        content = EXCLUDED.content,
+        summary = EXCLUDED.summary,
+        status = 'active',
+        updated_at = now()`,
+    ],
+  },
 ]
 
 async function runMigrations(db) {
