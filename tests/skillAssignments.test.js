@@ -292,4 +292,29 @@ describe('durable ClarityMode Skill assignments', () => {
       message: 'VidIQ did not return usable research for this outline. Your work was preserved; try again.',
     })
   })
+
+  test('retains the last meaningful stage when a failed assignment is shown publicly', () => {
+    expect(assignments.publicAssignment({
+      id: 'assignment-1',
+      status: 'failed',
+      stage: 'failed',
+      workflow_state: { stage: 'ready_for_review' },
+      artifacts: [],
+    }).stage).toBe('ready_for_review')
+  })
+
+  test('builds a compact VidIQ recovery request for a pre-migration outline revision', () => {
+    const row = {
+      source_task: { text: 'Do you have too many productivity tools?' },
+      brief: { seedIdea: 'Too many productivity tools' },
+      artifacts: [{ title: 'Why productivity tools stop helping' }],
+      workflow_state: { stage: 'ready_for_review' },
+    }
+    expect(assignments.needsRevisionEvidenceRecovery(row, {}, { revisionNotes: 'Make the argument sharper.' })).toBe(true)
+    expect(assignments.revisionResearchQueries(row)).toEqual([
+      'Too many productivity tools',
+      'Do you have too many productivity tools?',
+      'Why productivity tools stop helping',
+    ])
+  })
 })

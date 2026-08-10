@@ -169,7 +169,17 @@ router.post('/:id/respond', async (req, res) => {
     const response = req.body?.response && typeof req.body.response === 'object' ? req.body.response : {}
     const result = await db.query(
       `UPDATE skill_assignments
-          SET status = 'queued', pending_response = $3, approval = NULL, question = NULL,
+          SET status = 'queued',
+              stage = CASE
+                WHEN status = 'failed' AND COALESCE(workflow_state->>'stage', '') <> '' THEN workflow_state->>'stage'
+                ELSE stage
+              END,
+              pending_response = CASE
+                WHEN status = 'failed' AND COALESCE(($3::jsonb->>'retry')::boolean, false)
+                  THEN COALESCE(pending_response, $3::jsonb)
+                ELSE $3::jsonb
+              END,
+              approval = NULL, question = NULL,
               progress_label = 'ClarityMode is continuing...', updated_at = now()
         WHERE id = $1 AND user_id = $2 AND status IN ('needs_approval', 'needs_input', 'ready_for_review', 'failed')
         RETURNING *`,

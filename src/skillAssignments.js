@@ -65,6 +65,7 @@ function jsonSize(value) {
 }
 
 function publicAssignment(row) {
+  const workflowStage = String(row.workflow_state?.stage || '').trim()
   return {
     id: row.id,
     skillId: row.skill_id,
@@ -72,7 +73,7 @@ function publicAssignment(row) {
     projectRef: row.project_ref,
     sourceTask: row.source_task,
     status: row.status,
-    stage: row.stage,
+    stage: row.status === 'failed' && workflowStage ? workflowStage : row.stage,
     progressLabel: row.progress_label,
     approval: row.approval,
     question: row.question,
@@ -343,6 +344,34 @@ function sameQueries(left, right) {
   return JSON.stringify(normalize(left)) === JSON.stringify(normalize(right))
 }
 
+function revisionResearchQueries(row) {
+  const candidates = [
+    row.brief?.seedIdea,
+    row.source_task?.text,
+    ...(Array.isArray(row.artifacts) ? row.artifacts.map(artifact => artifact?.title) : []),
+  ]
+  const seen = new Set()
+  return candidates
+    .map(value => String(value || '').trim())
+    .filter(value => {
+      if (!value) return false
+      const key = value.toLowerCase()
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    .slice(0, 3)
+}
+
+function needsRevisionEvidenceRecovery(row, connectorEvidence = {}, humanResponse = {}) {
+  const workflowStage = String(row.workflow_state?.stage || '')
+  const isRevisionResume = workflowStage === 'ready_for_review'
+    && (Boolean(String(humanResponse?.revisionNotes || '').trim()) || humanResponse?.retry === true)
+  return isRevisionResume
+    && !connectorEvidence.vidiq?.results?.some(item => usefulEvidence(item?.evidence))
+    && revisionResearchQueries(row).length > 0
+}
+
 async function processAssignment(row, deps = {}) {
   let current = row
   let connectorEvidence = current.connector_evidence && typeof current.connector_evidence === 'object' ? current.connector_evidence : {}
@@ -350,6 +379,25 @@ async function processAssignment(row, deps = {}) {
     ? { vidiqEvidence: connectorEvidence.vidiq.results }
     : {}
   let humanResponse = current.pending_response || {}
+  if (needsRevisionEvidenceRecovery(current, connectorEvidence, humanResponse)) {
+    const apiKey = await readCredential(current.user_id, 'vidiq')
+    if (!apiKey) throw new Error('VidIQ evidence is required before this outline can be revised.')
+    const queries = revisionResearchQueries(current)
+    const results = await (deps.researchVidiq || vidiq.research)(apiKey, queries, deps.fetchImpl)
+    connectorEvidence = {
+      ...connectorEvidence,
+      vidiq: { queries, retrievedAt: new Date().toISOString(), results },
+    }
+    connectorResults = { vidiqEvidence: results }
+    await db.query(
+      `UPDATE skill_assignments
+          SET connector_evidence = $2,
+              progress_label = 'VidIQ research received; revising the outline...', updated_at = now()
+        WHERE id = $1`,
+      [current.id, connectorEvidence],
+    )
+    current = { ...current, connector_evidence: connectorEvidence }
+  }
   for (let pass = 0; pass < 4; pass += 1) {
     const invocation = await invokeAgent(current, { connectorResults, humanResponse }, deps)
     const result = enforceYouTubeInterviewGate(current, invocation.result)
@@ -462,7 +510,7 @@ async function workOnce(deps = {}) {
       } else {
         await db.query(
           `UPDATE skill_assignments
-              SET status = 'failed', stage = 'failed', progress_label = 'This assignment needs attention.',
+              SET status = 'failed', progress_label = 'This assignment needs attention.',
                   public_error = $2, internal_error = $3, run_started_at = NULL, updated_at = now()
             WHERE id = $1`,
           [row.id, failure.public, failure.internal],
@@ -498,6 +546,8 @@ module.exports = {
   parseAgentResult,
   persistResult,
   publicAssignment,
+  needsRevisionEvidenceRecovery,
+  revisionResearchQueries,
   resolveProviderValue,
   start,
   stop,

@@ -146,6 +146,8 @@ describe('ClarityMode Skill assignment entitlement boundary', () => {
       .send({ response: { revisionNotes: 'Make the second section more specific.' } })
     expect(res.status).toBe(202)
     expect(db.query.mock.calls.at(-1)[0]).toContain("'ready_for_review'")
+    expect(db.query.mock.calls.at(-1)[0]).toContain("pending_response")
+    expect(db.query.mock.calls.at(-1)[0]).toContain("'retry'")
   })
 })
 
