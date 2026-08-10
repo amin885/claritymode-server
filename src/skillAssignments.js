@@ -94,15 +94,16 @@ function parseAgentResult(value) {
   if (!result || typeof result !== 'object' || !VALID_RESULTS.has(result.status)) {
     throw new Error('The Skill returned an invalid result.')
   }
+  const status = result.status
   return {
-    status: result.status,
+    status,
     stage: String(result.stage || result.status).slice(0, 100),
     progress: { label: String(result.progress?.label || 'ClarityMode is working...').slice(0, 300) },
     state: result.state && typeof result.state === 'object' ? result.state : {},
     connectorRequest: result.connectorRequest && typeof result.connectorRequest === 'object' ? result.connectorRequest : null,
-    approval: result.approval && typeof result.approval === 'object' ? result.approval : null,
-    question: result.question && typeof result.question === 'object' ? result.question : null,
-    artifacts: Array.isArray(result.artifacts) ? result.artifacts.slice(0, 20) : [],
+    approval: status === 'needs_approval' && result.approval && typeof result.approval === 'object' ? result.approval : null,
+    question: status === 'needs_input' && result.question && typeof result.question === 'object' ? result.question : null,
+    artifacts: status === 'ready_for_review' && Array.isArray(result.artifacts) ? result.artifacts.slice(0, 20) : [],
     error: result.error && typeof result.error === 'object'
       ? { code: String(result.error.code || 'skill_failed').slice(0, 100), message: String(result.error.message || 'ClarityMode could not finish this assignment.').slice(0, 500) }
       : null,

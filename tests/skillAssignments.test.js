@@ -42,6 +42,30 @@ describe('durable ClarityMode Skill assignments', () => {
     expect(result.approval.kind).toBe('creative_direction')
   })
 
+  test('keeps approval, interview, and final-artifact payloads inside their matching states', () => {
+    const needsInput = assignments.parseAgentResult({
+      status: 'needs_input',
+      stage: 'await_interview',
+      question: { id: 'q1', prompt: 'What happened?' },
+      approval: { data: { angle: 'Stale angle' } },
+      artifacts: [{ title: 'Stale outline', content: 'Do not show this yet.' }],
+    })
+    expect(needsInput.question).toEqual({ id: 'q1', prompt: 'What happened?' })
+    expect(needsInput.approval).toBeNull()
+    expect(needsInput.artifacts).toEqual([])
+
+    const ready = assignments.parseAgentResult({
+      status: 'ready_for_review',
+      stage: 'ready_for_review',
+      question: { id: 'stale-question' },
+      approval: { data: { angle: 'Stale angle' } },
+      artifacts: [{ title: 'Outline', content: '# Final outline' }],
+    })
+    expect(ready.question).toBeNull()
+    expect(ready.approval).toBeNull()
+    expect(ready.artifacts).toHaveLength(1)
+  })
+
   test('parses MindStudio final responses that are wrapped and JSON encoded more than once', () => {
     const contract = {
       schemaVersion: 1,
