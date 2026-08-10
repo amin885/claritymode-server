@@ -231,7 +231,12 @@ async function workOnce(deps = {}) {
     if (!row) return false
     try {
       await processAssignment(row, deps)
-    } catch {
+    } catch (error) {
+      console.error('[skill-assignments] Assignment failed', {
+        assignmentId: row.id,
+        stage: row.stage || null,
+        error: error?.message || String(error),
+      })
       await db.query(
         `UPDATE skill_assignments
             SET status = 'failed', stage = 'failed', progress_label = 'This assignment needs attention.',
