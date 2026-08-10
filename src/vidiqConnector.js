@@ -79,13 +79,19 @@ function connectedChannelsTool(tools) {
       const name = String(tool?.name || '')
       const description = String(tool?.description || '')
       const text = `${name} ${description}`
-      const score = /connected[_ -]?channels/i.test(text) ? 4
+      const score = /^vidiq_user_channels$/i.test(name) ? 5
+        : /connected[_ -]?channels/i.test(text) ? 4
         : /list.*(?:my|your).*channels|(?:my|your).*channels/i.test(text) ? 3
           : /channel.*(?:account|connection)|(?:account|connection).*channel/i.test(text) ? 2 : 0
       return { tool, score }
     })
     .filter(item => item.score)
     .sort((left, right) => right.score - left.score)[0]?.tool
+}
+
+function channelDetailsTool(tools) {
+  return [...tools].find(tool => /^vidiq_get_channels_by_ids$/i.test(String(tool?.name || '')))
+    || [...tools].find(tool => /get.*channels.*ids|channels.*by.*ids/i.test(String(tool?.name || '')))
 }
 
 function schemaValue(definition, stringValue, numberValue) {
@@ -161,6 +167,22 @@ function normalizeChannels(value) {
   return [...unique.values()]
 }
 
+function normalizeChannelIds(value) {
+  const found = []
+  const visit = current => {
+    if (Array.isArray(current)) {
+      current.forEach(visit)
+      return
+    }
+    if (!current || typeof current !== 'object') return
+    const id = String(current.channelId || current.channel_id || current.youtubeChannelId || current.youtube_channel_id || '').trim()
+    if (id) found.push(id)
+    Object.values(current).forEach(visit)
+  }
+  visit(value)
+  return [...new Set(found)]
+}
+
 async function readConnectedChannels(apiKey, session, fetchImpl = fetch) {
   const tool = connectedChannelsTool(session.tools)
   if (!tool) return null
@@ -182,7 +204,24 @@ async function readConnectedChannels(apiKey, session, fetchImpl = fetch) {
     params: { name: tool.name, arguments: args },
   })
   if (response.body?.result?.isError) return null
-  return normalizeChannels(contentValue(response.body?.result))
+  const listedChannels = contentValue(response.body?.result)
+  const normalized = normalizeChannels(listedChannels)
+  if (normalized.length) return normalized
+
+  const channelIds = normalizeChannelIds(listedChannels)
+  if (!channelIds.length) return []
+  const detailsTool = channelDetailsTool(session.tools)
+  if (!detailsTool) return null
+  const detailsResponse = await rpc({
+    apiKey,
+    fetchImpl,
+    sessionId: session.sessionId,
+    id: 4,
+    method: 'tools/call',
+    params: { name: detailsTool.name, arguments: { channelIds } },
+  })
+  if (detailsResponse.body?.result?.isError) return null
+  return normalizeChannels(contentValue(detailsResponse.body?.result))
 }
 
 async function validate(apiKey, fetchImpl = fetch) {
@@ -220,4 +259,13 @@ async function research(apiKey, queries, fetchImpl = fetch) {
   return results
 }
 
-module.exports = { argumentsFor, connectedChannelsTool, normalizeChannels, parseSse, research, validate }
+module.exports = {
+  argumentsFor,
+  channelDetailsTool,
+  connectedChannelsTool,
+  normalizeChannelIds,
+  normalizeChannels,
+  parseSse,
+  research,
+  validate,
+}
