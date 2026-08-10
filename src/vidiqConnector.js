@@ -73,6 +73,21 @@ function keywordTool(tools) {
     .sort((left, right) => right.score - left.score)[0]?.tool
 }
 
+function connectedChannelsTool(tools) {
+  return [...tools]
+    .map(tool => {
+      const name = String(tool?.name || '')
+      const description = String(tool?.description || '')
+      const text = `${name} ${description}`
+      const score = /connected[_ -]?channels/i.test(text) ? 4
+        : /list.*(?:my|your).*channels|(?:my|your).*channels/i.test(text) ? 3
+          : /channel.*(?:account|connection)|(?:account|connection).*channel/i.test(text) ? 2 : 0
+      return { tool, score }
+    })
+    .filter(item => item.score)
+    .sort((left, right) => right.score - left.score)[0]?.tool
+}
+
 function schemaValue(definition, stringValue, numberValue) {
   const types = Array.isArray(definition?.type) ? definition.type : [definition?.type]
   const values = Array.isArray(definition?.enum) ? definition.enum : []
@@ -117,10 +132,64 @@ function contentValue(result) {
   try { return JSON.parse(text) } catch { return text }
 }
 
+function normalizeChannels(value) {
+  const found = []
+  const visit = current => {
+    if (Array.isArray(current)) {
+      current.forEach(visit)
+      return
+    }
+    if (!current || typeof current !== 'object') return
+    const name = String(
+      current.channelName || current.channel_name || current.channelTitle || current.channel_title
+      || current.displayName || current.display_name || current.title || current.name || '',
+    ).trim()
+    const id = String(current.channelId || current.channel_id || current.youtubeChannelId || current.youtube_channel_id || current.id || '').trim()
+    const handle = String(current.handle || current.channelHandle || current.channel_handle || '').trim()
+    const url = String(current.url || current.channelUrl || current.channel_url || '').trim()
+    if (name && (id || handle || url || /channel/i.test(String(current.type || current.kind || '')))) {
+      found.push({ id, name: name.slice(0, 160), handle: handle.slice(0, 160), url: url.slice(0, 500) })
+    }
+    Object.values(current).forEach(visit)
+  }
+  visit(value)
+  const unique = new Map()
+  for (const channel of found) {
+    const key = channel.id || channel.handle.toLowerCase() || channel.url.toLowerCase() || channel.name.toLowerCase()
+    if (!unique.has(key)) unique.set(key, channel)
+  }
+  return [...unique.values()]
+}
+
+async function readConnectedChannels(apiKey, session, fetchImpl = fetch) {
+  const tool = connectedChannelsTool(session.tools)
+  if (!tool) return []
+  const required = Array.isArray(tool?.inputSchema?.required) ? tool.inputSchema.required : []
+  const properties = tool?.inputSchema?.properties || {}
+  const args = {}
+  for (const name of required) {
+    const definition = properties[name] || {}
+    if (definition.default !== undefined) args[name] = definition.default
+    else if (Array.isArray(definition.enum) && definition.enum.length) args[name] = definition.enum[0]
+    else return []
+  }
+  const response = await rpc({
+    apiKey,
+    fetchImpl,
+    sessionId: session.sessionId,
+    id: 3,
+    method: 'tools/call',
+    params: { name: tool.name, arguments: args },
+  })
+  if (response.body?.result?.isError) return []
+  return normalizeChannels(contentValue(response.body?.result))
+}
+
 async function validate(apiKey, fetchImpl = fetch) {
   const session = await openSession(String(apiKey || '').trim(), fetchImpl)
   if (!keywordTool(session.tools)) throw new Error('VidIQ did not provide keyword research for this account.')
-  return { connected: true, toolCount: session.tools.length }
+  const channels = await readConnectedChannels(String(apiKey || '').trim(), session, fetchImpl)
+  return { connected: true, toolCount: session.tools.length, channels, channelsCheckedAt: new Date().toISOString() }
 }
 
 async function research(apiKey, queries, fetchImpl = fetch) {
@@ -146,4 +215,4 @@ async function research(apiKey, queries, fetchImpl = fetch) {
   return results
 }
 
-module.exports = { argumentsFor, parseSse, research, validate }
+module.exports = { argumentsFor, connectedChannelsTool, normalizeChannels, parseSse, research, validate }
