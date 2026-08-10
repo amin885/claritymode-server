@@ -95,6 +95,17 @@ describe('durable ClarityMode Skill assignments', () => {
       .rejects.toThrow('untrusted')
   })
 
+  test('does not confuse ordinary workflow nesting with remote-file indirection', async () => {
+    const nested = { status: 'needs_input' }
+    let cursor = nested
+    for (let index = 0; index < 20; index += 1) {
+      cursor.state = { step: index }
+      cursor = cursor.state
+    }
+
+    await expect(assignments.resolveProviderValue(nested, jest.fn())).resolves.toEqual(nested)
+  })
+
   test('persists a non-empty artifact list as JSONB instead of a PostgreSQL array', async () => {
     const query = jest.spyOn(db, 'query').mockResolvedValue({ rows: [] })
     const artifacts = [{ id: 'outline-1', title: 'YouTube outline', content: '# Finished outline' }]

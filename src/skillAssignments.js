@@ -137,8 +137,9 @@ function mindStudioRemoteUrl(value) {
   return url.toString()
 }
 
-async function resolveProviderValue(value, fetchImpl = fetch, depth = 0) {
-  if (depth > 8) throw new Error('The Skill returned a result with too many nested references.')
+async function resolveProviderValue(value, fetchImpl = fetch, remoteDepth = 0, structuralDepth = 0) {
+  if (remoteDepth > 8) throw new Error('The Skill returned a result with too many nested references.')
+  if (structuralDepth > 64) throw new Error('The Skill returned a result that is too deeply structured.')
   const remoteUrl = mindStudioRemoteUrl(value)
   if (remoteUrl) {
     const response = await fetchImpl(remoteUrl, { redirect: 'error' })
@@ -147,13 +148,13 @@ async function resolveProviderValue(value, fetchImpl = fetch, depth = 0) {
     if (declaredSize > MAX_PROVIDER_BYTES) throw new Error('The Skill returned a result that is too large.')
     const bytes = Buffer.from(await response.arrayBuffer())
     if (bytes.length > MAX_PROVIDER_BYTES) throw new Error('The Skill returned a result that is too large.')
-    return resolveProviderValue(parseJsonValue(bytes.toString('utf8')), fetchImpl, depth + 1)
+    return resolveProviderValue(parseJsonValue(bytes.toString('utf8')), fetchImpl, remoteDepth + 1, 0)
   }
   if (Array.isArray(value)) {
-    return Promise.all(value.map(item => resolveProviderValue(item, fetchImpl, depth + 1)))
+    return Promise.all(value.map(item => resolveProviderValue(item, fetchImpl, remoteDepth, structuralDepth + 1)))
   }
   if (value && typeof value === 'object') {
-    const entries = await Promise.all(Object.entries(value).map(async ([key, item]) => [key, await resolveProviderValue(item, fetchImpl, depth + 1)]))
+    const entries = await Promise.all(Object.entries(value).map(async ([key, item]) => [key, await resolveProviderValue(item, fetchImpl, remoteDepth, structuralDepth + 1)]))
     return Object.fromEntries(entries)
   }
   return value
