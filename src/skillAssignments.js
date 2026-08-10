@@ -33,6 +33,7 @@ function assignmentFailure(error, row = {}) {
   const unavailable = normalized.includes('401') || normalized.includes('403')
     || normalized.includes('unauthorized') || normalized.includes('forbidden')
     || normalized.includes('quota') || normalized.includes('insufficient credit')
+  const missingVidIQ = normalized.includes('vidiq evidence') || normalized.includes('vidiq direction')
   const attempt = Number(row.attempt_count || 0) + 1
 
   return {
@@ -47,7 +48,9 @@ function assignmentFailure(error, row = {}) {
       attempt,
       recordedAt: new Date().toISOString(),
     },
-    public: unreadable
+    public: missingVidIQ
+      ? { code: 'vidiq_evidence_missing', message: 'VidIQ did not return usable research for this outline. Your work was preserved; try again.' }
+      : unreadable
       ? { code: 'incomplete_result', message: 'ClarityMode received an incomplete result. Your work was preserved; try again.' }
       : unavailable
         ? { code: 'skill_service_unavailable', message: 'This ClarityMode Skill needs service attention. Your work was preserved.' }
@@ -142,10 +145,48 @@ function parseAgentResult(value) {
     approval: status === 'needs_approval' && result.approval && typeof result.approval === 'object' ? result.approval : null,
     question: status === 'needs_input' && result.question && typeof result.question === 'object' ? result.question : null,
     artifacts: status === 'ready_for_review' && Array.isArray(result.artifacts) ? result.artifacts.slice(0, 20) : [],
+    evidenceUsed: result.evidenceUsed && typeof result.evidenceUsed === 'object' ? result.evidenceUsed : {},
     error: result.error && typeof result.error === 'object'
       ? { code: String(result.error.code || 'skill_failed').slice(0, 100), message: String(result.error.message || 'ClarityMode could not finish this assignment.').slice(0, 500) }
       : null,
   }
+}
+
+function usefulEvidence(value) {
+  if (value === null || value === undefined) return false
+  if (typeof value === 'number' || typeof value === 'boolean') return true
+  if (typeof value === 'string') {
+    const clean = value.trim()
+    return clean.length >= 8 && !/^(?:none|null|undefined|no (?:data|results?|metrics?)|not available)$/i.test(clean)
+  }
+  if (Array.isArray(value)) return value.some(usefulEvidence)
+  if (typeof value === 'object') return Object.values(value).some(usefulEvidence)
+  return false
+}
+
+function validVidIQUsage(value) {
+  if (!value || typeof value !== 'object') return false
+  const queries = Array.isArray(value.queries) ? value.queries.map(item => String(item || '').trim()).filter(Boolean) : []
+  const decisions = Array.isArray(value.decisions) ? value.decisions.map(item => String(item || '').trim()).filter(Boolean) : []
+  const summary = String(value.summary || value.primaryKeyword || value.titleDecision || '').trim()
+  return queries.length > 0 && (decisions.length > 0 || summary.length >= 12)
+}
+
+function enforceYouTubeVidIQGate(row, result, connectorEvidence = {}) {
+  if (result.status !== 'ready_for_review') return result
+  const vidiq = connectorEvidence.vidiq || row.connector_evidence?.vidiq
+  if (!vidiq || !Array.isArray(vidiq.results) || !vidiq.results.some(item => usefulEvidence(item?.evidence))) {
+    throw new Error('The Skill tried to finish without usable VidIQ evidence.')
+  }
+  const artifactText = result.artifacts.map(artifact => String(artifact?.content || '')).join('\n')
+  const hasVisibleEvidence = /^#{1,6}\s+vidiq direction used\s*$/im.test(artifactText)
+  const mentionsAQuery = (Array.isArray(vidiq.queries) ? vidiq.queries : [])
+    .some(query => artifactText.toLowerCase().includes(String(query || '').trim().toLowerCase()))
+  if (!validVidIQUsage(result.evidenceUsed?.vidiq) && !(hasVisibleEvidence && mentionsAQuery)) {
+    throw new Error('The Skill did not explain how it used the VidIQ evidence.')
+  }
+  if (!hasVisibleEvidence) throw new Error('The Skill did not include its VidIQ direction in the final outline.')
+  return result
 }
 
 function enforceYouTubeInterviewGate(row, result) {
@@ -269,7 +310,7 @@ async function readCredential(userId, connectorId) {
   return result.rows[0]?.encrypted_value ? credentials.decrypt(result.rows[0].encrypted_value) : ''
 }
 
-async function persistResult(row, result, providerThreadId) {
+async function persistResult(row, result, providerThreadId, connectorEvidence = row.connector_evidence || {}) {
   const status = result.status === 'working' ? 'queued' : result.status
   if (!PUBLIC_STATUSES.has(status)) throw new Error('The Skill returned an unsupported state.')
   await db.query(
@@ -277,6 +318,7 @@ async function persistResult(row, result, providerThreadId) {
         SET status = $2, stage = $3, progress_label = $4, workflow_state = $5,
             connector_request = $6, approval = $7, question = $8, artifacts = $9,
             public_error = $10, internal_error = NULL, pending_response = NULL, provider_thread_id = $11,
+            connector_evidence = $12,
             run_started_at = NULL, updated_at = now()
       WHERE id = $1`,
     [
@@ -291,19 +333,29 @@ async function persistResult(row, result, providerThreadId) {
       JSON.stringify(result.artifacts),
       result.error,
       providerThreadId,
+      connectorEvidence,
     ],
   )
 }
 
+function sameQueries(left, right) {
+  const normalize = value => [...new Set((Array.isArray(value) ? value : []).map(item => String(item || '').trim().toLowerCase()).filter(Boolean))].sort()
+  return JSON.stringify(normalize(left)) === JSON.stringify(normalize(right))
+}
+
 async function processAssignment(row, deps = {}) {
   let current = row
-  let connectorResults = {}
+  let connectorEvidence = current.connector_evidence && typeof current.connector_evidence === 'object' ? current.connector_evidence : {}
+  let connectorResults = connectorEvidence.vidiq?.results
+    ? { vidiqEvidence: connectorEvidence.vidiq.results }
+    : {}
   let humanResponse = current.pending_response || {}
   for (let pass = 0; pass < 4; pass += 1) {
     const invocation = await invokeAgent(current, { connectorResults, humanResponse }, deps)
     const result = enforceYouTubeInterviewGate(current, invocation.result)
     if (result.status !== 'needs_connector') {
-      await persistResult(current, result, invocation.threadId)
+      const enforced = enforceYouTubeVidIQGate(current, result, connectorEvidence)
+      await persistResult(current, enforced, invocation.threadId, connectorEvidence)
       return
     }
     if (result.connectorRequest?.connector !== 'vidiq' || result.connectorRequest?.operation !== 'keyword_research') {
@@ -321,9 +373,29 @@ async function processAssignment(row, deps = {}) {
       }, invocation.threadId)
       return
     }
-    connectorResults = { vidiqEvidence: await vidiq.research(apiKey, result.connectorRequest.queries, deps.fetchImpl) }
+    const requestedQueries = result.connectorRequest.queries
+    const cached = connectorEvidence.vidiq
+    const results = cached && sameQueries(cached.queries, requestedQueries) && Array.isArray(cached.results)
+      ? cached.results
+      : await vidiq.research(apiKey, requestedQueries, deps.fetchImpl)
+    connectorEvidence = {
+      ...connectorEvidence,
+      vidiq: {
+        queries: Array.isArray(requestedQueries) ? requestedQueries : [],
+        retrievedAt: cached && results === cached.results ? cached.retrievedAt : new Date().toISOString(),
+        results,
+      },
+    }
+    await db.query(
+      `UPDATE skill_assignments
+          SET workflow_state = $2, connector_evidence = $3, provider_thread_id = $4,
+              progress_label = 'VidIQ research received; building the outline...', updated_at = now()
+        WHERE id = $1`,
+      [current.id, result.state, connectorEvidence, invocation.threadId],
+    )
+    connectorResults = { vidiqEvidence: results }
     humanResponse = {}
-    current = { ...current, workflow_state: result.state, pending_response: null }
+    current = { ...current, workflow_state: result.state, connector_evidence: connectorEvidence, pending_response: null }
   }
   throw new Error('The Skill could not finish its connector work.')
 }
@@ -420,6 +492,7 @@ module.exports = {
   configured,
   assignmentFailure,
   enforceYouTubeInterviewGate,
+  enforceYouTubeVidIQGate,
   invokeAgent,
   normalizeCreate,
   parseAgentResult,

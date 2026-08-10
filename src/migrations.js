@@ -314,6 +314,14 @@ $skill$,
         ADD COLUMN IF NOT EXISTS internal_error JSONB`,
     ],
   },
+  {
+    version: 12,
+    name: 'skill-assignment-connector-evidence',
+    statements: [
+      `ALTER TABLE skill_assignments
+        ADD COLUMN IF NOT EXISTS connector_evidence JSONB NOT NULL DEFAULT '{}'::jsonb`,
+    ],
+  },
 ]
 
 async function runMigrations(db) {

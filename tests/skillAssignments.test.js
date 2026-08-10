@@ -227,6 +227,40 @@ describe('durable ClarityMode Skill assignments', () => {
     expect(assignments.enforceYouTubeInterviewGate({ brief: {} }, approval)).toBe(approval)
   })
 
+  test('requires durable VidIQ evidence before an outline can be reviewed', () => {
+    const result = {
+      status: 'ready_for_review',
+      evidenceUsed: { vidiq: { queries: ['wake up at 5am'], summary: 'Low-competition search opportunity.' } },
+      artifacts: [{ content: '# Outline\n\n## VidIQ direction used\nLow-competition search opportunity.' }],
+    }
+    expect(() => assignments.enforceYouTubeVidIQGate({}, result, {})).toThrow('usable VidIQ evidence')
+    expect(assignments.enforceYouTubeVidIQGate({}, result, {
+      vidiq: { results: [{ query: 'wake up at 5am', evidence: { searchVolume: 1200, competition: 'low' } }] },
+    })).toBe(result)
+  })
+
+  test('requires the final artifact to explain how VidIQ shaped it', () => {
+    const evidence = {
+      vidiq: { queries: ['wake up at 5am'], results: [{ query: 'wake up at 5am', evidence: { searchVolume: 1200 } }] },
+    }
+    expect(() => assignments.enforceYouTubeVidIQGate({}, {
+      status: 'ready_for_review',
+      evidenceUsed: {},
+      artifacts: [{ content: '# Outline' }],
+    }, evidence)).toThrow('explain how it used')
+    expect(() => assignments.enforceYouTubeVidIQGate({}, {
+      status: 'ready_for_review',
+      evidenceUsed: { vidiq: { queries: ['wake up at 5am'], decisions: ['Use the exact phrase in the title.'] } },
+      artifacts: [{ content: '# Outline without the evidence section' }],
+    }, evidence)).toThrow('include its VidIQ direction')
+
+    expect(assignments.enforceYouTubeVidIQGate({}, {
+      status: 'ready_for_review',
+      evidenceUsed: {},
+      artifacts: [{ content: '# Outline\n\n## VidIQ direction used\nQuery: wake up at 5am\nDecision: lead with the exact phrase.' }],
+    }, evidence)).toMatchObject({ status: 'ready_for_review' })
+  })
+
   test('retries temporary provider failures without exposing provider details', () => {
     const failure = assignments.assignmentFailure(Object.assign(new Error('MindStudio fetch failed: ECONNRESET'), { code: 'ECONNRESET' }), {
       stage: 'await_interview',
@@ -249,5 +283,13 @@ describe('durable ClarityMode Skill assignments', () => {
       message: 'ClarityMode received an incomplete result. Your work was preserved; try again.',
     })
     expect(failure.internal.message).toContain('unreadable result')
+  })
+
+  test('explains missing VidIQ evidence without exposing the provider', () => {
+    const failure = assignments.assignmentFailure(new Error('The Skill tried to finish without usable VidIQ evidence.'), { stage: 'await_outline' })
+    expect(failure.public).toEqual({
+      code: 'vidiq_evidence_missing',
+      message: 'VidIQ did not return usable research for this outline. Your work was preserved; try again.',
+    })
   })
 })
