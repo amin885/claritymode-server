@@ -127,4 +127,32 @@ describe('durable ClarityMode Skill assignments', () => {
     expect(JSON.parse(parameters[8])).toEqual(artifacts)
     query.mockRestore()
   })
+
+  test('requires real creator evidence before the first approval gate', () => {
+    const result = assignments.enforceYouTubeInterviewGate({ brief: { seedIdea: 'Wake up at 5am' } }, {
+      status: 'needs_approval',
+      stage: 'await_approval',
+      progress: { label: 'Approve' },
+      state: { interviewResult: { interview: { answers: [] } } },
+      approval: { data: { angle: 'An inferred angle' } },
+      artifacts: [],
+      error: null,
+    })
+
+    expect(result).toMatchObject({
+      status: 'needs_input',
+      stage: 'await_interview',
+      question: { id: 'firsthand-angle', kind: 'creator_interview' },
+      approval: null,
+    })
+  })
+
+  test('allows approval after a substantive creator answer', () => {
+    const approval = {
+      status: 'needs_approval',
+      stage: 'await_approval',
+      state: { interviewResult: { interview: { answers: [{ question: 'What happened?', answer: 'I tested this with my own routine for three months.' }] } } },
+    }
+    expect(assignments.enforceYouTubeInterviewGate({ brief: {} }, approval)).toBe(approval)
+  })
 })

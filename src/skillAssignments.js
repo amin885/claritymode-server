@@ -109,6 +109,30 @@ function parseAgentResult(value) {
   }
 }
 
+function enforceYouTubeInterviewGate(row, result) {
+  if (result.status !== 'needs_approval' || result.stage !== 'await_approval') return result
+  const brainDump = String(row.brief?.brainDump || '').trim()
+  const answers = result.state?.interviewResult?.interview?.answers
+  const hasCreatorAnswer = Array.isArray(answers)
+    && answers.some(item => String(item?.answer || '').trim().length >= 20)
+  if (hasCreatorAnswer || brainDump.length >= 80) return result
+  return {
+    ...result,
+    status: 'needs_input',
+    stage: 'await_interview',
+    progress: { label: 'ClarityMode needs your point of view before it builds the outline.' },
+    state: { ...(result.state || {}), stage: 'await_interview' },
+    approval: null,
+    question: {
+      id: 'firsthand-angle',
+      kind: 'creator_interview',
+      prompt: 'What have you personally experienced or observed that makes your take on this different from the usual advice?',
+    },
+    artifacts: [],
+    error: null,
+  }
+}
+
 function parseJsonValue(value) {
   let parsed = value
   for (let depth = 0; depth < 6 && typeof parsed === 'string'; depth += 1) {
@@ -232,7 +256,7 @@ async function processAssignment(row, deps = {}) {
   let humanResponse = current.pending_response || {}
   for (let pass = 0; pass < 4; pass += 1) {
     const invocation = await invokeAgent(current, { connectorResults, humanResponse }, deps)
-    const result = invocation.result
+    const result = enforceYouTubeInterviewGate(current, invocation.result)
     if (result.status !== 'needs_connector') {
       await persistResult(current, result, invocation.threadId)
       return
@@ -336,6 +360,7 @@ function stop() {
 module.exports = {
   SKILL_ID,
   configured,
+  enforceYouTubeInterviewGate,
   invokeAgent,
   normalizeCreate,
   parseAgentResult,
