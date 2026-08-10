@@ -251,8 +251,14 @@ async function invokeAgent(row, { connectorResults = {}, humanResponse = {} } = 
       ? { version: String(process.env.MINDSTUDIO_YOUTUBE_PRODUCER_VERSION).trim() }
       : {}),
   })
-  const resolvedResponse = await resolveProviderValue(response, deps.fetchImpl || fetch)
-  return { result: parseAgentResult(resolvedResponse), threadId: String(response?.threadId || resolvedResponse?.threadId || '') }
+  // MindStudio may include older thread messages alongside the current result.
+  // Those messages can contain expired private large-file references. They are
+  // history, not the assignment result, and must not be dereferenced here.
+  const currentResult = response && typeof response === 'object' && Object.prototype.hasOwnProperty.call(response, 'result')
+    ? response.result
+    : response
+  const resolvedResult = await resolveProviderValue(currentResult, deps.fetchImpl || fetch)
+  return { result: parseAgentResult(resolvedResult), threadId: String(response?.threadId || '') }
 }
 
 async function readCredential(userId, connectorId) {

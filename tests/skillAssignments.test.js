@@ -119,6 +119,53 @@ describe('durable ClarityMode Skill assignments', () => {
       .rejects.toThrow('untrusted')
   })
 
+  test('ignores expired large-file references in MindStudio thread history', async () => {
+    const originalApiKey = process.env.MINDSTUDIO_API_KEY
+    const originalAgentId = process.env.MINDSTUDIO_YOUTUBE_PRODUCER_AGENT_ID
+    process.env.MINDSTUDIO_API_KEY = 'test-key'
+    process.env.MINDSTUDIO_YOUTUBE_PRODUCER_AGENT_ID = 'test-agent'
+    const currentResult = JSON.stringify({
+      status: 'needs_input',
+      stage: 'await_interview',
+      progress: { label: 'One more question' },
+      state: { stage: 'await_interview' },
+      question: { id: 'q2', prompt: 'What happened next?' },
+      artifacts: [],
+    })
+    const runAgent = jest.fn().mockResolvedValue({
+      success: true,
+      threadId: 'thread-1',
+      result: currentResult,
+      thread: [{ content: '@@remote_variable@@https://youai-appdata-private.s3.us-west-2.amazonaws.com/lfs/expired.json?signature=expired' }],
+    })
+    const fetchImpl = jest.fn(async () => ({ ok: false, status: 403 }))
+
+    try {
+      const invocation = await assignments.invokeAgent({
+        id: 'assignment-1',
+        skill_id: assignments.SKILL_ID,
+        skill_version: '1.0.0',
+        project_context: {},
+        source_task: {},
+        brief: {},
+        workflow_state: {},
+      }, {}, {
+        MindStudioAgent: class { runAgent = runAgent },
+        loadSdk: jest.fn().mockResolvedValue({}),
+        fetchImpl,
+      })
+
+      expect(invocation.result).toMatchObject({ status: 'needs_input', stage: 'await_interview' })
+      expect(invocation.threadId).toBe('thread-1')
+      expect(fetchImpl).not.toHaveBeenCalled()
+    } finally {
+      if (originalApiKey === undefined) delete process.env.MINDSTUDIO_API_KEY
+      else process.env.MINDSTUDIO_API_KEY = originalApiKey
+      if (originalAgentId === undefined) delete process.env.MINDSTUDIO_YOUTUBE_PRODUCER_AGENT_ID
+      else process.env.MINDSTUDIO_YOUTUBE_PRODUCER_AGENT_ID = originalAgentId
+    }
+  })
+
   test('does not confuse ordinary workflow nesting with remote-file indirection', async () => {
     const nested = { status: 'needs_input' }
     let cursor = nested
