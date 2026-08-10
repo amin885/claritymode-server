@@ -179,4 +179,28 @@ describe('durable ClarityMode Skill assignments', () => {
     }
     expect(assignments.enforceYouTubeInterviewGate({ brief: {} }, approval)).toBe(approval)
   })
+
+  test('retries temporary provider failures without exposing provider details', () => {
+    const failure = assignments.assignmentFailure(Object.assign(new Error('MindStudio fetch failed: ECONNRESET'), { code: 'ECONNRESET' }), {
+      stage: 'await_interview',
+      attempt_count: 0,
+    })
+    expect(failure).toMatchObject({ transient: true, retry: true, attempt: 1 })
+    expect(failure.public.message).not.toMatch(/MindStudio|ECONNRESET/i)
+    expect(failure.internal).toMatchObject({ code: 'ECONNRESET', stage: 'await_interview' })
+  })
+
+  test('stops retrying temporary failures after the bounded retry window', () => {
+    const failure = assignments.assignmentFailure(new Error('Gateway timeout'), { attempt_count: 2 })
+    expect(failure).toMatchObject({ transient: true, retry: false, attempt: 3 })
+  })
+
+  test('gives malformed results a useful safe message while retaining private diagnostics', () => {
+    const failure = assignments.assignmentFailure(new Error('The Skill returned an unreadable result.'), { stage: 'await_outline' })
+    expect(failure.public).toEqual({
+      code: 'incomplete_result',
+      message: 'ClarityMode received an incomplete result. Your work was preserved; try again.',
+    })
+    expect(failure.internal.message).toContain('unreadable result')
+  })
 })

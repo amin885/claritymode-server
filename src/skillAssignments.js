@@ -10,6 +10,7 @@ const MAX_PROVIDER_BYTES = 2 * 1024 * 1024
 const MINDSTUDIO_REMOTE_PREFIX = '@@remote_variable@@'
 let timer = null
 let running = false
+const MAX_TRANSIENT_ATTEMPTS = 3
 
 function configured() {
   return Boolean(
@@ -17,6 +18,43 @@ function configured() {
     && String(process.env.MINDSTUDIO_API_KEY || '').trim()
     && String(process.env.MINDSTUDIO_YOUTUBE_PRODUCER_AGENT_ID || '').trim()
   )
+}
+
+function assignmentFailure(error, row = {}) {
+  const message = String(error?.message || error || 'Unknown assignment error').slice(0, 2_000)
+  const code = String(error?.code || error?.status || '').slice(0, 120)
+  const normalized = `${code} ${message}`.toLowerCase()
+  const transient = [
+    '429', 'rate limit', 'timeout', 'timed out', 'temporarily unavailable',
+    'fetch failed', 'econnreset', 'econnrefused', 'socket hang up',
+    'bad gateway', 'service unavailable', 'gateway timeout',
+  ].some(fragment => normalized.includes(fragment)) || /^5\d\d$/.test(code)
+  const unreadable = normalized.includes('unreadable result') || normalized.includes('invalid assignment result')
+  const unavailable = normalized.includes('401') || normalized.includes('403')
+    || normalized.includes('unauthorized') || normalized.includes('forbidden')
+    || normalized.includes('quota') || normalized.includes('insufficient credit')
+  const attempt = Number(row.attempt_count || 0) + 1
+
+  return {
+    transient,
+    retry: transient && attempt < MAX_TRANSIENT_ATTEMPTS,
+    attempt,
+    internal: {
+      name: String(error?.name || 'Error').slice(0, 120),
+      code: code || null,
+      message,
+      stage: String(row.stage || '').slice(0, 120) || null,
+      attempt,
+      recordedAt: new Date().toISOString(),
+    },
+    public: unreadable
+      ? { code: 'incomplete_result', message: 'ClarityMode received an incomplete result. Your work was preserved; try again.' }
+      : unavailable
+        ? { code: 'skill_service_unavailable', message: 'This ClarityMode Skill needs service attention. Your work was preserved.' }
+        : transient
+          ? { code: 'temporary_failure', message: 'The Skill service was temporarily unavailable. Your work was preserved; try again.' }
+          : { code: 'assignment_failed', message: 'ClarityMode could not finish this assignment. Your work was preserved; try again.' },
+  }
 }
 
 function jsonSize(value) {
@@ -232,7 +270,7 @@ async function persistResult(row, result, providerThreadId) {
     `UPDATE skill_assignments
         SET status = $2, stage = $3, progress_label = $4, workflow_state = $5,
             connector_request = $6, approval = $7, question = $8, artifacts = $9,
-            public_error = $10, pending_response = NULL, provider_thread_id = $11,
+            public_error = $10, internal_error = NULL, pending_response = NULL, provider_thread_id = $11,
             run_started_at = NULL, updated_at = now()
       WHERE id = $1`,
     [
@@ -327,18 +365,31 @@ async function workOnce(deps = {}) {
     try {
       await processAssignment(row, deps)
     } catch (error) {
+      const failure = assignmentFailure(error, row)
       console.error('[skill-assignments] Assignment failed', {
         assignmentId: row.id,
         stage: row.stage || null,
-        error: error?.message || String(error),
+        attempt: failure.attempt,
+        retrying: failure.retry,
+        error: failure.internal.message,
       })
-      await db.query(
-        `UPDATE skill_assignments
-            SET status = 'failed', stage = 'failed', progress_label = 'This assignment needs attention.',
-                public_error = $2, run_started_at = NULL, updated_at = now()
-          WHERE id = $1`,
-        [row.id, { code: 'assignment_failed', message: 'ClarityMode could not finish this assignment. Your work was preserved; try again.' }],
-      )
+      if (failure.retry) {
+        await db.query(
+          `UPDATE skill_assignments
+              SET status = 'queued', progress_label = 'The Skill service paused; retrying safely...',
+                  public_error = NULL, internal_error = $2, run_started_at = NULL, updated_at = now()
+            WHERE id = $1`,
+          [row.id, failure.internal],
+        )
+      } else {
+        await db.query(
+          `UPDATE skill_assignments
+              SET status = 'failed', stage = 'failed', progress_label = 'This assignment needs attention.',
+                  public_error = $2, internal_error = $3, run_started_at = NULL, updated_at = now()
+            WHERE id = $1`,
+          [row.id, failure.public, failure.internal],
+        )
+      }
     }
     return true
   } finally {
@@ -361,6 +412,7 @@ function stop() {
 module.exports = {
   SKILL_ID,
   configured,
+  assignmentFailure,
   enforceYouTubeInterviewGate,
   invokeAgent,
   normalizeCreate,

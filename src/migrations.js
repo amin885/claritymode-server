@@ -306,6 +306,14 @@ $skill$,
         WHERE id = 'claritymode-youtube-script-producer'`,
     ],
   },
+  {
+    version: 11,
+    name: 'skill-assignment-private-diagnostics',
+    statements: [
+      `ALTER TABLE skill_assignments
+        ADD COLUMN IF NOT EXISTS internal_error JSONB`,
+    ],
+  },
 ]
 
 async function runMigrations(db) {
