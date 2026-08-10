@@ -1,4 +1,5 @@
 const assignments = require('../src/skillAssignments')
+const db = require('../src/db')
 
 describe('durable ClarityMode Skill assignments', () => {
   test('normalizes a task-backed assignment without provider details', () => {
@@ -92,5 +93,27 @@ describe('durable ClarityMode Skill assignments', () => {
   test('rejects large-file references outside MindStudio private storage', async () => {
     await expect(assignments.resolveProviderValue('@@remote_variable@@https://example.com/result.json', jest.fn()))
       .rejects.toThrow('untrusted')
+  })
+
+  test('persists a non-empty artifact list as JSONB instead of a PostgreSQL array', async () => {
+    const query = jest.spyOn(db, 'query').mockResolvedValue({ rows: [] })
+    const artifacts = [{ id: 'outline-1', title: 'YouTube outline', content: '# Finished outline' }]
+
+    await assignments.persistResult({ id: 'assignment-1' }, {
+      status: 'ready_for_review',
+      stage: 'ready_for_review',
+      progress: { label: 'Outline ready' },
+      state: { stage: 'ready_for_review' },
+      connectorRequest: null,
+      approval: null,
+      question: null,
+      artifacts,
+      error: null,
+    }, 'provider-thread-1')
+
+    const parameters = query.mock.calls[0][1]
+    expect(typeof parameters[8]).toBe('string')
+    expect(JSON.parse(parameters[8])).toEqual(artifacts)
+    query.mockRestore()
   })
 })
