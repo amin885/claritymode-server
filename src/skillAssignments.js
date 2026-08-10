@@ -6,6 +6,8 @@ const SKILL_ID = 'claritymode-youtube-script-producer'
 const VALID_RESULTS = new Set(['working', 'needs_connector', 'needs_approval', 'needs_input', 'ready_for_review', 'failed'])
 const PUBLIC_STATUSES = new Set(['queued', 'working', 'needs_approval', 'needs_input', 'ready_for_review', 'accepted', 'failed', 'cancelled'])
 const MAX_INPUT_BYTES = 512 * 1024
+const MAX_PROVIDER_BYTES = 2 * 1024 * 1024
+const MINDSTUDIO_REMOTE_PREFIX = '@@remote_variable@@'
 let timer = null
 let running = false
 
@@ -107,6 +109,56 @@ function parseAgentResult(value) {
   }
 }
 
+function parseJsonValue(value) {
+  let parsed = value
+  for (let depth = 0; depth < 6 && typeof parsed === 'string'; depth += 1) {
+    const clean = parsed.trim().replace(/^```json\s*/i, '').replace(/\s*```$/, '')
+    try {
+      parsed = JSON.parse(clean)
+    } catch {
+      break
+    }
+  }
+  return parsed
+}
+
+function mindStudioRemoteUrl(value) {
+  if (typeof value !== 'string' || !value.startsWith(MINDSTUDIO_REMOTE_PREFIX)) return null
+  const raw = value.slice(MINDSTUDIO_REMOTE_PREFIX.length).trim()
+  let url
+  try {
+    url = new URL(raw)
+  } catch {
+    throw new Error('The Skill returned an invalid large result reference.')
+  }
+  if (url.protocol !== 'https:' || !/^youai-appdata-private\.s3\.[a-z0-9-]+\.amazonaws\.com$/i.test(url.hostname)) {
+    throw new Error('The Skill returned an untrusted large result reference.')
+  }
+  return url.toString()
+}
+
+async function resolveProviderValue(value, fetchImpl = fetch, depth = 0) {
+  if (depth > 8) throw new Error('The Skill returned a result with too many nested references.')
+  const remoteUrl = mindStudioRemoteUrl(value)
+  if (remoteUrl) {
+    const response = await fetchImpl(remoteUrl, { redirect: 'error' })
+    if (!response?.ok) throw new Error('The Skill finished, but its result could not be downloaded.')
+    const declaredSize = Number(response.headers?.get?.('content-length') || 0)
+    if (declaredSize > MAX_PROVIDER_BYTES) throw new Error('The Skill returned a result that is too large.')
+    const bytes = Buffer.from(await response.arrayBuffer())
+    if (bytes.length > MAX_PROVIDER_BYTES) throw new Error('The Skill returned a result that is too large.')
+    return resolveProviderValue(parseJsonValue(bytes.toString('utf8')), fetchImpl, depth + 1)
+  }
+  if (Array.isArray(value)) {
+    return Promise.all(value.map(item => resolveProviderValue(item, fetchImpl, depth + 1)))
+  }
+  if (value && typeof value === 'object') {
+    const entries = await Promise.all(Object.entries(value).map(async ([key, item]) => [key, await resolveProviderValue(item, fetchImpl, depth + 1)]))
+    return Object.fromEntries(entries)
+  }
+  return value
+}
+
 async function invokeAgent(row, { connectorResults = {}, humanResponse = {} } = {}, deps = {}) {
   const apiKey = String(process.env.MINDSTUDIO_API_KEY || '').trim()
   const appId = String(process.env.MINDSTUDIO_YOUTUBE_PRODUCER_AGENT_ID || '').trim()
@@ -135,7 +187,8 @@ async function invokeAgent(row, { connectorResults = {}, humanResponse = {} } = 
       ? { version: String(process.env.MINDSTUDIO_YOUTUBE_PRODUCER_VERSION).trim() }
       : {}),
   })
-  return { result: parseAgentResult(response), threadId: String(response?.threadId || '') }
+  const resolvedResponse = await resolveProviderValue(response, deps.fetchImpl || fetch)
+  return { result: parseAgentResult(resolvedResponse), threadId: String(response?.threadId || resolvedResponse?.threadId || '') }
 }
 
 async function readCredential(userId, connectorId) {
@@ -286,6 +339,7 @@ module.exports = {
   normalizeCreate,
   parseAgentResult,
   publicAssignment,
+  resolveProviderValue,
   start,
   stop,
   workOnce,

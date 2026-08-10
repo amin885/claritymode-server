@@ -128,6 +128,25 @@ describe('ClarityMode Skill assignment entitlement boundary', () => {
     expect(res.status).toBe(403)
     expect(res.body.error).toContain('not enabled')
   })
+
+  test('allows final outline revision notes before acceptance', async () => {
+    mockApprovedUser()
+    db.query.mockResolvedValueOnce({
+      rows: [{
+        id: '11111111-1111-4111-8111-111111111111',
+        user_id: 'user-1',
+        status: 'queued',
+        pending_response: { revisionNotes: 'Make the second section more specific.' },
+        artifacts: [],
+      }],
+    })
+    const res = await request(app)
+      .post('/v2/skill-assignments/11111111-1111-4111-8111-111111111111/respond')
+      .set('authorization', `Bearer ${makeToken()}`)
+      .send({ response: { revisionNotes: 'Make the second section more specific.' } })
+    expect(res.status).toBe(202)
+    expect(db.query.mock.calls.at(-1)[0]).toContain("'ready_for_review'")
+  })
 })
 
 describe('GET /auth/admin/users', () => {

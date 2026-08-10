@@ -66,4 +66,31 @@ describe('durable ClarityMode Skill assignments', () => {
     expect(assignments.publicAssignment({ artifacts: {} }).artifacts).toEqual([])
     expect(assignments.publicAssignment({ artifacts: [{ title: 'Script' }] }).artifacts).toEqual([{ title: 'Script' }])
   })
+
+  test('resolves nested MindStudio large-file results before validating the assignment contract', async () => {
+    const remoteUrl = 'https://youai-appdata-private.s3.us-west-2.amazonaws.com/lfs/final.json?signature=test'
+    const artifactUrl = 'https://youai-appdata-private.s3.us-west-2.amazonaws.com/lfs/outline.json?signature=test'
+    const fetchImpl = jest.fn(async url => {
+      const bytes = Buffer.from(url === remoteUrl
+        ? JSON.stringify({ result: { status: 'ready_for_review', artifacts: `@@remote_variable@@${artifactUrl}` } })
+        : JSON.stringify([{ title: 'Outline', content: '# Finished outline' }]))
+      return {
+        ok: true,
+        headers: { get: () => null },
+        arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+      }
+    })
+
+    const resolved = await assignments.resolveProviderValue({ result: `@@remote_variable@@${remoteUrl}` }, fetchImpl)
+    const parsed = assignments.parseAgentResult(resolved)
+
+    expect(parsed.status).toBe('ready_for_review')
+    expect(parsed.artifacts).toEqual([{ title: 'Outline', content: '# Finished outline' }])
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+  })
+
+  test('rejects large-file references outside MindStudio private storage', async () => {
+    await expect(assignments.resolveProviderValue('@@remote_variable@@https://example.com/result.json', jest.fn()))
+      .rejects.toThrow('untrusted')
+  })
 })

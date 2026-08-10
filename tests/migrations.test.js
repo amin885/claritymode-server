@@ -2,7 +2,7 @@ const { migrations, runMigrations } = require('../src/migrations')
 
 describe('numbered database migrations', () => {
   test('contains a durable collaboration migration after the legacy schema', () => {
-    expect(migrations.map(item => item.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9])
+    expect(migrations.map(item => item.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
     expect(migrations[1].statements.join('\n')).toContain('shared_project_operations')
     expect(migrations[1].statements.join('\n')).toContain('shared_project_conflicts')
     expect(migrations[2].statements.join('\n')).toContain('shared_project_events')

@@ -287,6 +287,25 @@ $skill$,
       )`,
     ],
   },
+  {
+    version: 10,
+    name: 'youtube-outline-builder-product-skill',
+    statements: [
+      `UPDATE v2_skills
+          SET name = 'YouTube Outline Builder',
+              description = 'Turn a rough video idea into three hooks and a detailed, research-backed outline through a human-reviewed project workflow.',
+              version = '0.2.0',
+              content = $skill$# YouTube Outline Builder
+
+This contained ClarityMode product skill interviews the creator one question at a time, pauses for angle and scope approval, then returns three hook options and a detailed Markdown outline for final review.
+
+ClarityMode owns the assignment envelope and human approval gates. The user connects their own VidIQ account for read-only YouTube evidence. The execution provider remains hidden and replaceable.
+$skill$,
+              summary = 'A contained 10-80-10 project workflow for creator interview, scoped research, and detailed YouTube outline production.',
+              updated_at = now()
+        WHERE id = 'claritymode-youtube-script-producer'`,
+    ],
+  },
 ]
 
 async function runMigrations(db) {
