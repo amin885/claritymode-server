@@ -163,7 +163,7 @@ function normalizeChannels(value) {
 
 async function readConnectedChannels(apiKey, session, fetchImpl = fetch) {
   const tool = connectedChannelsTool(session.tools)
-  if (!tool) return []
+  if (!tool) return null
   const required = Array.isArray(tool?.inputSchema?.required) ? tool.inputSchema.required : []
   const properties = tool?.inputSchema?.properties || {}
   const args = {}
@@ -171,7 +171,7 @@ async function readConnectedChannels(apiKey, session, fetchImpl = fetch) {
     const definition = properties[name] || {}
     if (definition.default !== undefined) args[name] = definition.default
     else if (Array.isArray(definition.enum) && definition.enum.length) args[name] = definition.enum[0]
-    else return []
+    else return null
   }
   const response = await rpc({
     apiKey,
@@ -181,7 +181,7 @@ async function readConnectedChannels(apiKey, session, fetchImpl = fetch) {
     method: 'tools/call',
     params: { name: tool.name, arguments: args },
   })
-  if (response.body?.result?.isError) return []
+  if (response.body?.result?.isError) return null
   return normalizeChannels(contentValue(response.body?.result))
 }
 
@@ -189,7 +189,12 @@ async function validate(apiKey, fetchImpl = fetch) {
   const session = await openSession(String(apiKey || '').trim(), fetchImpl)
   if (!keywordTool(session.tools)) throw new Error('VidIQ did not provide keyword research for this account.')
   const channels = await readConnectedChannels(String(apiKey || '').trim(), session, fetchImpl)
-  return { connected: true, toolCount: session.tools.length, channels, channelsCheckedAt: new Date().toISOString() }
+  return {
+    connected: true,
+    toolCount: session.tools.length,
+    channels: Array.isArray(channels) ? channels : [],
+    ...(Array.isArray(channels) ? { channelsCheckedAt: new Date().toISOString() } : {}),
+  }
 }
 
 async function research(apiKey, queries, fetchImpl = fetch) {
