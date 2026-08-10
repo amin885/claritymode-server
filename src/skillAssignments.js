@@ -33,7 +33,7 @@ function publicAssignment(row) {
     progressLabel: row.progress_label,
     approval: row.approval,
     question: row.question,
-    artifacts: row.artifacts || [],
+    artifacts: Array.isArray(row.artifacts) ? row.artifacts : [],
     error: row.public_error,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

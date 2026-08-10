@@ -61,4 +61,9 @@ describe('durable ClarityMode Skill assignments', () => {
   test('rejects malformed provider responses before they reach users', () => {
     expect(() => assignments.parseAgentResult({ result: 'not-json' })).toThrow('unreadable')
   })
+
+  test('normalizes legacy non-list artifacts before returning an assignment', () => {
+    expect(assignments.publicAssignment({ artifacts: {} }).artifacts).toEqual([])
+    expect(assignments.publicAssignment({ artifacts: [{ title: 'Script' }] }).artifacts).toEqual([{ title: 'Script' }])
+  })
 })
