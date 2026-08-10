@@ -64,14 +64,30 @@ function normalizeCreate(input = {}) {
 }
 
 function parseAgentResult(value) {
-  let result = value?.result ?? value
-  if (result && typeof result === 'object' && result.finalResponse !== undefined) result = result.finalResponse
-  if (typeof result === 'string') {
-    const clean = result.trim().replace(/^```json\s*/i, '').replace(/\s*```$/, '')
-    try { result = JSON.parse(clean) } catch { throw new Error('The Skill returned an unreadable result.') }
-  }
-  if (result && typeof result === 'object' && typeof result.finalResponse === 'string') {
-    try { result = JSON.parse(result.finalResponse) } catch { throw new Error('The Skill returned an unreadable result.') }
+  let result = value
+  for (let depth = 0; depth < 6; depth += 1) {
+    if (result && typeof result === 'object' && !Array.isArray(result)) {
+      if (VALID_RESULTS.has(result.status)) break
+      if (result.result !== undefined) {
+        result = result.result
+        continue
+      }
+      if (result.finalResponse !== undefined) {
+        result = result.finalResponse
+        continue
+      }
+      break
+    }
+    if (typeof result === 'string') {
+      const clean = result.trim().replace(/^```json\s*/i, '').replace(/\s*```$/, '')
+      try {
+        result = JSON.parse(clean)
+        continue
+      } catch {
+        throw new Error('The Skill returned an unreadable result.')
+      }
+    }
+    break
   }
   if (!result || typeof result !== 'object' || !VALID_RESULTS.has(result.status)) {
     throw new Error('The Skill returned an invalid result.')

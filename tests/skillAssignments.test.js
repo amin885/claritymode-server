@@ -41,6 +41,23 @@ describe('durable ClarityMode Skill assignments', () => {
     expect(result.approval.kind).toBe('creative_direction')
   })
 
+  test('parses MindStudio final responses that are wrapped and JSON encoded more than once', () => {
+    const contract = {
+      schemaVersion: 1,
+      status: 'needs_connector',
+      stage: 'await_vidiq_seed',
+      progress: { label: 'Gathering keyword research dataâ€¦' },
+      state: { stage: 'await_vidiq_seed' },
+      connectorRequest: { connector: 'vidiq', operation: 'keyword_research', queries: ['wake up at 5am'] },
+      artifacts: [],
+    }
+    const result = assignments.parseAgentResult({
+      result: JSON.stringify({ finalResponse: JSON.stringify(JSON.stringify(contract)) }),
+    })
+    expect(result.status).toBe('needs_connector')
+    expect(result.connectorRequest.queries).toEqual(['wake up at 5am'])
+  })
+
   test('rejects malformed provider responses before they reach users', () => {
     expect(() => assignments.parseAgentResult({ result: 'not-json' })).toThrow('unreadable')
   })
