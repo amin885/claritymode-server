@@ -99,24 +99,32 @@ function mockApprovedUser() {
   db.query.mockResolvedValueOnce({ rows: [{ id: 'user-1', email: 'a@b.com', is_approved: true }] })
 }
 
-describe('YouTube Script Producer entitlement boundary', () => {
+describe('ClarityMode Skill assignment entitlement boundary', () => {
   test('does not report the product skill as available without account access', async () => {
     mockApprovedUser()
     db.query.mockResolvedValueOnce({ rows: [{ enabled: false }] })
+    db.query.mockResolvedValueOnce({ rows: [] })
+    db.query.mockResolvedValueOnce({ rows: [] })
     const res = await request(app)
-      .get('/v2/product-skills/youtube-script-producer/status')
+      .get('/v2/skill-assignments/status')
       .set('authorization', `Bearer ${makeToken()}`)
     expect(res.status).toBe(200)
-    expect(res.body).toEqual(expect.objectContaining({ entitled: false, serviceReady: false }))
+    expect(res.body.skills).toEqual(expect.arrayContaining([expect.objectContaining({ entitled: false })]))
   })
 
   test('blocks execution when the account has not been assigned the skill', async () => {
     mockApprovedUser()
     db.query.mockResolvedValueOnce({ rows: [{ enabled: false }] })
     const res = await request(app)
-      .post('/v2/product-skills/youtube-script-producer/run')
+      .post('/v2/skill-assignments/')
       .set('authorization', `Bearer ${makeToken()}`)
-      .send({ operation: 'generate_candidates' })
+      .send({
+        id: '11111111-1111-4111-8111-111111111111',
+        clientRequestId: 'request-1',
+        skillId: 'claritymode-youtube-script-producer',
+        projectRef: { path: 'Projects/Test' },
+        sourceTask: { id: 'task-test-1', text: 'Write a script' },
+      })
     expect(res.status).toBe(403)
     expect(res.body.error).toContain('not enabled')
   })

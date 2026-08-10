@@ -222,6 +222,71 @@ $skill$,
         updated_at = now()`,
     ],
   },
+  {
+    version: 8,
+    name: 'durable-skill-assignments',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS skill_connector_credentials (
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        connector_id TEXT NOT NULL,
+        encrypted_value TEXT NOT NULL,
+        metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (user_id, connector_id)
+      )`,
+      `CREATE TABLE IF NOT EXISTS skill_assignments (
+        id UUID PRIMARY KEY,
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        skill_id TEXT NOT NULL REFERENCES v2_skills(id),
+        skill_version TEXT NOT NULL DEFAULT '1.0.0',
+        client_request_id TEXT NOT NULL,
+        project_ref JSONB NOT NULL,
+        source_task JSONB NOT NULL,
+        brief JSONB NOT NULL,
+        project_context JSONB NOT NULL,
+        status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN (
+          'queued', 'working', 'needs_approval', 'needs_input',
+          'ready_for_review', 'accepted', 'failed', 'cancelled'
+        )),
+        stage TEXT NOT NULL DEFAULT 'queued',
+        progress_label TEXT NOT NULL DEFAULT 'Preparing this assignment...',
+        workflow_state JSONB NOT NULL DEFAULT '{}'::jsonb,
+        connector_request JSONB,
+        approval JSONB,
+        question JSONB,
+        artifacts JSONB NOT NULL DEFAULT '[]'::jsonb,
+        public_error JSONB,
+        pending_response JSONB,
+        provider_thread_id TEXT NOT NULL DEFAULT '',
+        attempt_count INTEGER NOT NULL DEFAULT 0,
+        run_started_at TIMESTAMPTZ,
+        accepted_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        UNIQUE (user_id, client_request_id)
+      )`,
+      `CREATE INDEX IF NOT EXISTS skill_assignments_user_updated
+        ON skill_assignments (user_id, updated_at DESC)`,
+      `CREATE INDEX IF NOT EXISTS skill_assignments_worker_queue
+        ON skill_assignments (status, updated_at)
+        WHERE status IN ('queued', 'working')`,
+    ],
+  },
+  {
+    version: 9,
+    name: 'skill-user-profiles',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS skill_user_profiles (
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        skill_id TEXT NOT NULL REFERENCES v2_skills(id) ON DELETE CASCADE,
+        profile JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (user_id, skill_id)
+      )`,
+    ],
+  },
 ]
 
 async function runMigrations(db) {

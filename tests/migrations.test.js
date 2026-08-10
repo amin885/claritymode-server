@@ -2,7 +2,7 @@ const { migrations, runMigrations } = require('../src/migrations')
 
 describe('numbered database migrations', () => {
   test('contains a durable collaboration migration after the legacy schema', () => {
-    expect(migrations.map(item => item.version)).toEqual([1, 2, 3, 4, 5, 6, 7])
+    expect(migrations.map(item => item.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9])
     expect(migrations[1].statements.join('\n')).toContain('shared_project_operations')
     expect(migrations[1].statements.join('\n')).toContain('shared_project_conflicts')
     expect(migrations[2].statements.join('\n')).toContain('shared_project_events')
@@ -10,6 +10,9 @@ describe('numbered database migrations', () => {
     expect(migrations[4].statements.join('\n')).toContain('user_preferences')
     expect(migrations[5].statements.join('\n')).toContain('trusted_device_sessions')
     expect(migrations[6].statements.join('\n')).toContain('claritymode-youtube-script-producer')
+    expect(migrations[7].statements.join('\n')).toContain('skill_assignments')
+    expect(migrations[7].statements.join('\n')).toContain('skill_connector_credentials')
+    expect(migrations[8].statements.join('\n')).toContain('skill_user_profiles')
   })
 
   test('runs unapplied migrations in one transaction and releases the client', async () => {
