@@ -208,21 +208,27 @@ function enforceYouTubeVidIQGate(row, result, connectorEvidence = {}) {
     throw new Error('The Skill tried to finish without usable VidIQ outlier evidence.')
   }
   const artifactText = result.artifacts.map(artifact => String(artifact?.content || '')).join('\n')
+  const headings = [...artifactText.matchAll(/^#{1,6}\s+(.+?)\s*$/gim)]
+    .map(match => match[1].trim().toLowerCase())
   const requiredSections = [
-    'why this idea can perform',
-    'alternative title ideas',
-    'three hook options',
-    'core argument',
-    'detailed outline',
-    'closing and call to action',
+    {
+      label: 'why this idea can perform',
+      matches: heading => /(?:why|evidence|opportunity)/.test(heading)
+        && /(?:perform|reach|outlier|breakout|vidiq|opportunity)/.test(heading),
+    },
+    { label: 'alternative title ideas', matches: heading => /title/.test(heading) && /(?:alternative|ideas?|options?)/.test(heading) },
+    { label: 'three hook options', matches: heading => /hooks?/.test(heading) },
+    { label: 'core argument', matches: heading => /(?:core|central|main)\s+(?:argument|idea|thesis)|^angle$/.test(heading) },
+    { label: 'detailed outline', matches: heading => /outline/.test(heading) },
+    { label: 'closing and call to action', matches: heading => /(?:closing|conclusion|call to action|cta)/.test(heading) },
   ]
-  const missingSection = requiredSections.find(section => !new RegExp(`^#{1,6}\\s+${section}\\s*$`, 'im').test(artifactText))
+  const missingSection = requiredSections.find(section => !headings.some(section.matches))
   const mentionsAQuery = (Array.isArray(vidiq.queries) ? vidiq.queries : [])
     .some(query => artifactText.toLowerCase().includes(String(query || '').trim().toLowerCase()))
   if (!validVidIQUsage(result.evidenceUsed?.vidiq) && !mentionsAQuery) {
     throw new Error('The Skill did not explain how it used the VidIQ evidence.')
   }
-  if (missingSection) throw new Error(`The Skill did not include the required ${missingSection} section.`)
+  if (missingSection) throw new Error(`The Skill did not include the required ${missingSection.label} section.`)
   return result
 }
 

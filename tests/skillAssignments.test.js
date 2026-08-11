@@ -323,6 +323,18 @@ describe('durable ClarityMode Skill assignments', () => {
     }, evidence)).toMatchObject({ status: 'ready_for_review' })
   })
 
+  test('accepts clear equivalent outline headings without weakening the content gate', () => {
+    const evidence = {
+      vidiq: { queries: ['morning planning'], results: [{ query: 'morning planning', evidence: { outliers: [{ title: 'Plan Tomorrow Tonight', outlierScore: 7.1 }] } }] },
+    }
+    const result = {
+      status: 'ready_for_review',
+      evidenceUsed: { vidiq: { queries: ['morning planning'], decisions: ['Use the breakout framing.'] } },
+      artifacts: [{ content: '# Plan Tomorrow Tonight\n\n## Outlier evidence and reach opportunity\nA 7.1x breakout supports this direction.\n\n## Title options\n- Why Morning Planning Is Too Late\n\n## Hooks\n- Hook one\n- Hook two\n- Hook three\n\n## Central argument\nPlan the night before.\n\n## Video outline\n- Opening\n- Main point\n\n## Conclusion and CTA\nTry tonight planning.' }],
+    }
+    expect(assignments.enforceYouTubeVidIQGate({}, result, evidence)).toBe(result)
+  })
+
   test('retries temporary provider failures without exposing provider details', () => {
     const failure = assignments.assignmentFailure(Object.assign(new Error('MindStudio fetch failed: ECONNRESET'), { code: 'ECONNRESET' }), {
       stage: 'await_interview',
