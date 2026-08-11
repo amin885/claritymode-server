@@ -167,6 +167,9 @@ function parseAgentResult(value) {
     approval: status === 'needs_approval' && result.approval && typeof result.approval === 'object' ? result.approval : null,
     question: status === 'needs_input' && result.question && typeof result.question === 'object' ? result.question : null,
     artifacts: status === 'ready_for_review' && Array.isArray(result.artifacts) ? result.artifacts.slice(0, 20) : [],
+    outline: status === 'ready_for_review' && result.outline && typeof result.outline === 'object' && !Array.isArray(result.outline)
+      ? result.outline
+      : null,
     evidenceUsed: result.evidenceUsed && typeof result.evidenceUsed === 'object' ? result.evidenceUsed : {},
     error: result.error && typeof result.error === 'object'
       ? { code: String(result.error.code || 'skill_failed').slice(0, 100), message: String(result.error.message || 'ClarityMode could not finish this assignment.').slice(0, 500) }
@@ -198,6 +201,103 @@ function hasOutlierEvidence(results) {
   return Array.isArray(results) && results.some(item => usefulEvidence(item?.evidence?.outliers))
 }
 
+function cleanOutlineText(value, maxLength = 5000) {
+  return String(value || '').trim().slice(0, maxLength)
+}
+
+function outlineList(value, maxItems = 20) {
+  return Array.isArray(value)
+    ? value.map(item => cleanOutlineText(item, 1000)).filter(Boolean).slice(0, maxItems)
+    : []
+}
+
+function renderStructuredYouTubeOutline(outline) {
+  if (!outline || typeof outline !== 'object') return ''
+  const title = cleanOutlineText(outline.title, 300)
+  const titles = outlineList(outline.alternativeTitles || outline.titleIdeas, 10)
+  const hooks = outlineList(outline.hooks, 10)
+  const coreArgument = cleanOutlineText(outline.coreArgument || outline.angle, 3000)
+  const sections = Array.isArray(outline.sections) ? outline.sections.slice(0, 30) : []
+  const closing = cleanOutlineText(outline.closing, 3000)
+  const callToAction = cleanOutlineText(outline.callToAction || outline.cta, 2000)
+  if (!title || hooks.length < 1 || !coreArgument || sections.length < 1) return ''
+
+  const lines = [`# ${title}`, '', '## Alternative title ideas']
+  lines.push(...(titles.length ? titles : [title]).map(item => `- ${item}`))
+  lines.push('', '## Hook options', ...hooks.map(item => `- ${item}`), '', '## Core argument', coreArgument, '', '## Detailed outline')
+  for (const [index, section] of sections.entries()) {
+    if (typeof section === 'string') {
+      lines.push(`- ${cleanOutlineText(section, 2000)}`)
+      continue
+    }
+    const heading = cleanOutlineText(section?.heading || section?.title, 300) || `Section ${index + 1}`
+    const bullets = outlineList(section?.bullets || section?.points, 30)
+    lines.push(`### ${heading}`)
+    lines.push(...bullets.map(item => `- ${item}`))
+    if (section?.content) lines.push(cleanOutlineText(section.content, 5000))
+    lines.push('')
+  }
+  lines.push('## Closing and call to action')
+  if (closing) lines.push(closing, '')
+  if (callToAction) lines.push(`**Call to action:** ${callToAction}`)
+  return lines.join('\n').trim()
+}
+
+function outlierCandidates(value, results = []) {
+  if (!value || results.length >= 5) return results
+  if (Array.isArray(value)) {
+    for (const item of value) outlierCandidates(item, results)
+    return results
+  }
+  if (typeof value !== 'object') return results
+  const title = cleanOutlineText(value.title || value.videoTitle || value.name, 300)
+  const score = value.outlierScore ?? value.outlier_score ?? value.multiplier ?? value.score
+  const views = value.views ?? value.viewCount ?? value.view_count
+  if (title && (score !== undefined || views !== undefined)) results.push({ title, score, views })
+  for (const nested of Object.values(value)) outlierCandidates(nested, results)
+  return results
+}
+
+function renderVidIQPerformanceSection(vidiq, usage) {
+  const queries = [
+    ...(Array.isArray(usage?.queries) ? usage.queries : []),
+    ...(Array.isArray(vidiq?.queries) ? vidiq.queries : []),
+    ...(Array.isArray(vidiq?.results) ? vidiq.results.map(item => item?.query) : []),
+  ].map(item => cleanOutlineText(item, 300)).filter(Boolean)
+  const uniqueQueries = [...new Set(queries)].slice(0, 8)
+  const decisions = outlineList(usage?.decisions, 10)
+  const summary = cleanOutlineText(usage?.summary || usage?.titleDecision || usage?.primaryKeyword, 2000)
+  const candidates = outlierCandidates((vidiq?.results || []).map(item => item?.evidence?.outliers))
+  const lines = ['## Why this idea can perform']
+  if (summary) lines.push(summary)
+  if (uniqueQueries.length) lines.push('', `**VidIQ searches:** ${uniqueQueries.join(', ')}`)
+  if (candidates.length) {
+    lines.push('', '**Breakout evidence:**')
+    for (const candidate of candidates) {
+      const details = []
+      if (candidate.score !== undefined) details.push(`${candidate.score}x outlier score`)
+      if (candidate.views !== undefined) details.push(`${candidate.views} views`)
+      lines.push(`- ${candidate.title}${details.length ? ` (${details.join(', ')})` : ''}`)
+    }
+  }
+  if (decisions.length) lines.push('', '**How the evidence shaped this outline:**', ...decisions.map(item => `- ${item}`))
+  return lines.join('\n').trim()
+}
+
+function canonicalizeYouTubeArtifacts(result, vidiq) {
+  const structured = renderStructuredYouTubeOutline(result.outline)
+  const existingArtifacts = Array.isArray(result.artifacts) ? result.artifacts : []
+  const firstArtifact = existingArtifacts.find(artifact => cleanOutlineText(artifact?.content).length >= 200)
+  const body = structured || cleanOutlineText(firstArtifact?.content, 200000)
+  if (!body) throw new Error('The Skill returned an incomplete YouTube outline.')
+
+  const performance = renderVidIQPerformanceSection(vidiq, result.evidenceUsed?.vidiq)
+  const alreadyHasPerformance = /^#{1,6}\s+.*(?:perform|reach|outlier|breakout|vidiq|opportunity).*$/im.test(body)
+  const content = alreadyHasPerformance ? body : `${performance}\n\n${body}`
+  const title = cleanOutlineText(firstArtifact?.title || result.outline?.title || 'YouTube outline', 300)
+  return [{ ...(firstArtifact || {}), title, content }]
+}
+
 function enforceYouTubeVidIQGate(row, result, connectorEvidence = {}) {
   if (result.status !== 'ready_for_review') return result
   const vidiq = connectorEvidence.vidiq || row.connector_evidence?.vidiq
@@ -208,28 +308,12 @@ function enforceYouTubeVidIQGate(row, result, connectorEvidence = {}) {
     throw new Error('The Skill tried to finish without usable VidIQ outlier evidence.')
   }
   const artifactText = result.artifacts.map(artifact => String(artifact?.content || '')).join('\n')
-  const headings = [...artifactText.matchAll(/^#{1,6}\s+(.+?)\s*$/gim)]
-    .map(match => match[1].trim().toLowerCase())
-  const requiredSections = [
-    {
-      label: 'why this idea can perform',
-      matches: heading => /(?:why|evidence|opportunity)/.test(heading)
-        && /(?:perform|reach|outlier|breakout|vidiq|opportunity)/.test(heading),
-    },
-    { label: 'alternative title ideas', matches: heading => /title/.test(heading) && /(?:alternative|ideas?|options?)/.test(heading) },
-    { label: 'three hook options', matches: heading => /hooks?/.test(heading) },
-    { label: 'core argument', matches: heading => /(?:core|central|main)\s+(?:argument|idea|thesis)|^angle$/.test(heading) },
-    { label: 'detailed outline', matches: heading => /outline/.test(heading) },
-    { label: 'closing and call to action', matches: heading => /(?:closing|conclusion|call to action|cta)/.test(heading) },
-  ]
-  const missingSection = requiredSections.find(section => !headings.some(section.matches))
   const mentionsAQuery = (Array.isArray(vidiq.queries) ? vidiq.queries : [])
     .some(query => artifactText.toLowerCase().includes(String(query || '').trim().toLowerCase()))
   if (!validVidIQUsage(result.evidenceUsed?.vidiq) && !mentionsAQuery) {
     throw new Error('The Skill did not explain how it used the VidIQ evidence.')
   }
-  if (missingSection) throw new Error(`The Skill did not include the required ${missingSection.label} section.`)
-  return result
+  return { ...result, artifacts: canonicalizeYouTubeArtifacts(result, vidiq) }
 }
 
 function enforceYouTubeInterviewGate(row, result) {

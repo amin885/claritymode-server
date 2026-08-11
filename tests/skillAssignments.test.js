@@ -287,9 +287,11 @@ describe('durable ClarityMode Skill assignments', () => {
       artifacts: [{ content: completeOutline }],
     }
     expect(() => assignments.enforceYouTubeVidIQGate({}, result, {})).toThrow('usable VidIQ evidence')
-    expect(assignments.enforceYouTubeVidIQGate({}, result, {
+    const enforced = assignments.enforceYouTubeVidIQGate({}, result, {
       vidiq: { results: [{ query: 'wake up at 5am', evidence: { outliers: [{ title: 'Breakout', outlierScore: 8.4 }], keyword: { searchVolume: 1200, competition: 'low' } } }] },
-    })).toBe(result)
+    })
+    expect(enforced.artifacts[0].content).toContain('## Why this idea can perform')
+    expect(enforced.artifacts[0].content).toContain('# Wake up at 5am')
   })
 
   test('distinguishes genuine outlier research from legacy keyword-only evidence', () => {
@@ -301,7 +303,7 @@ describe('durable ClarityMode Skill assignments', () => {
     ])).toBe(true)
   })
 
-  test('requires the final artifact to explain how VidIQ shaped it', () => {
+  test('requires the provider to report how VidIQ shaped the result without trusting its Markdown headings', () => {
     const evidence = {
       vidiq: { queries: ['wake up at 5am'], results: [{ query: 'wake up at 5am', evidence: { outliers: [{ title: 'Breakout', outlierScore: 8.4 }], keyword: { searchVolume: 1200 } } }] },
     }
@@ -314,7 +316,15 @@ describe('durable ClarityMode Skill assignments', () => {
       status: 'ready_for_review',
       evidenceUsed: { vidiq: { queries: ['wake up at 5am'], decisions: ['Use the exact phrase in the title.'] } },
       artifacts: [{ content: '# Outline without the evidence section' }],
-    }, evidence)).toThrow('required why this idea can perform section')
+    }, evidence)).toThrow('incomplete YouTube outline')
+
+    const headingIndependent = assignments.enforceYouTubeVidIQGate({}, {
+      status: 'ready_for_review',
+      evidenceUsed: { vidiq: { queries: ['wake up at 5am'], decisions: ['Use the exact phrase in the title.'] } },
+      artifacts: [{ title: 'Outline', content: '# A complete provider draft\n\nThis deliberately uses provider-specific section names. '.repeat(12) }],
+    }, evidence)
+    expect(headingIndependent.artifacts[0].content).toContain('## Why this idea can perform')
+    expect(headingIndependent.artifacts[0].content).toContain('Use the exact phrase in the title.')
 
     expect(assignments.enforceYouTubeVidIQGate({}, {
       status: 'ready_for_review',
@@ -323,7 +333,7 @@ describe('durable ClarityMode Skill assignments', () => {
     }, evidence)).toMatchObject({ status: 'ready_for_review' })
   })
 
-  test('accepts clear equivalent outline headings without weakening the content gate', () => {
+  test('does not use provider-authored headings as the machine contract', () => {
     const evidence = {
       vidiq: { queries: ['morning planning'], results: [{ query: 'morning planning', evidence: { outliers: [{ title: 'Plan Tomorrow Tonight', outlierScore: 7.1 }] } }] },
     }
@@ -332,7 +342,32 @@ describe('durable ClarityMode Skill assignments', () => {
       evidenceUsed: { vidiq: { queries: ['morning planning'], decisions: ['Use the breakout framing.'] } },
       artifacts: [{ content: '# Plan Tomorrow Tonight\n\n## Outlier evidence and reach opportunity\nA 7.1x breakout supports this direction.\n\n## Title options\n- Why Morning Planning Is Too Late\n\n## Hooks\n- Hook one\n- Hook two\n- Hook three\n\n## Central argument\nPlan the night before.\n\n## Video outline\n- Opening\n- Main point\n\n## Conclusion and CTA\nTry tonight planning.' }],
     }
-    expect(assignments.enforceYouTubeVidIQGate({}, result, evidence)).toBe(result)
+    const enforced = assignments.enforceYouTubeVidIQGate({}, result, evidence)
+    expect(enforced.artifacts[0].content).toContain('## Outlier evidence and reach opportunity')
+  })
+
+  test('renders a structured outline into canonical Markdown owned by ClarityMode', () => {
+    const evidence = {
+      vidiq: { results: [{ query: 'morning planning', evidence: { outliers: [{ title: 'Plan Tonight', outlierScore: 7.1, views: 420000 }] } }] },
+    }
+    const enforced = assignments.enforceYouTubeVidIQGate({}, {
+      status: 'ready_for_review',
+      evidenceUsed: { vidiq: { queries: ['morning planning'], decisions: ['Lead with the counterintuitive timing claim.'] } },
+      outline: {
+        title: 'Why Morning Planning Is Too Late',
+        alternativeTitles: ['Plan Tomorrow Before Bed'],
+        hooks: ['Your morning plan is already late.', 'The best morning routine starts tonight.', 'Stop deciding after you wake up.'],
+        coreArgument: 'Planning the night before removes decisions from the morning.',
+        sections: [{ heading: 'The problem', bullets: ['Morning inputs immediately compete for attention.'] }],
+        closing: 'Choose tomorrow before today ends.',
+        callToAction: 'Join the workshop.',
+      },
+      artifacts: [],
+    }, evidence)
+    expect(enforced.artifacts[0].content).toContain('## Why this idea can perform')
+    expect(enforced.artifacts[0].content).toContain('7.1x outlier score')
+    expect(enforced.artifacts[0].content).toContain('## Alternative title ideas')
+    expect(enforced.artifacts[0].content).toContain('## Detailed outline')
   })
 
   test('retries temporary provider failures without exposing provider details', () => {
