@@ -415,9 +415,13 @@ describe('durable ClarityMode Skill assignments', () => {
       vidiq: { queries: ['morning planning'], results: [] },
     }, {
       readCredential: async () => 'vidiq-key',
+      generateTopicCandidates: async () => [],
       researchVidiq: async () => [
         { query: 'night before planning', evidence: { outliers: { videos: [{ title: 'My Night Before Planning System', outlierScore: 8.2 }] } } },
         { query: 'morning productivity', evidence: { outliers: { videos: [{ title: 'Canadian Morning News', outlierScore: 12 }] } } },
+      ],
+      evaluateTopicCandidates: async () => [
+        { query: 'night before planning', title: 'Plan tomorrow tonight', reason: 'Strong audience fit with breakout evidence.' },
       ],
     })
     expect(pivot.result).toMatchObject({
@@ -426,8 +430,54 @@ describe('durable ClarityMode Skill assignments', () => {
       question: { kind: 'topic_choice' },
     })
     expect(pivot.result.question.options).toHaveLength(1)
-    expect(pivot.result.question.options[0]).toMatchObject({ title: 'night before planning' })
-    expect(pivot.result.question.options[0].reason).toContain('8.2x')
+    expect(pivot.result.question.options[0]).toMatchObject({ title: 'Plan tomorrow tonight' })
+    expect(pivot.result.question.options[0].reason).toContain('Strong audience fit')
+  })
+
+  test('asks the topic worker for adjacent ideas when the first VidIQ response contains none', async () => {
+    const researchVidiq = jest.fn(async (_key, queries) => queries.map(query => ({
+      query,
+      evidence: { outliers: { videos: [{ title: `Breakout evidence for ${query}`, outlierScore: 6.4 }] } },
+    })))
+    const pivot = await assignments.buildVidIQTopicPivot({
+      user_id: 'user-1',
+      source_task: { text: 'Morning planning is too late' },
+      brief: { seedIdea: 'Morning planning is too late' },
+    }, { state: {}, evidenceUsed: {} }, {
+      vidiq: { queries: ['morning planning is too late'], results: [] },
+    }, {
+      readCredential: async () => 'vidiq-key',
+      generateTopicCandidates: async () => [
+        { query: 'plan tomorrow the night before', title: 'Plan tomorrow tonight' },
+        { query: 'evening planning routine', title: 'The evening planning reset' },
+      ],
+      researchVidiq,
+      evaluateTopicCandidates: async () => [
+        { query: 'evening planning routine', title: 'The evening planning reset', reason: 'The strongest validated opportunity.' },
+      ],
+    })
+
+    expect(researchVidiq).toHaveBeenCalledWith('vidiq-key', [
+      'plan tomorrow the night before',
+      'evening planning routine',
+    ], undefined)
+    expect(pivot.result.question.options).toEqual([
+      expect.objectContaining({ title: 'The evening planning reset', query: 'evening planning routine' }),
+    ])
+  })
+
+  test('normalizes topic worker results without trusting provider wrappers', () => {
+    expect(assignments.normalizedTopicWorkerOptions({
+      result: JSON.stringify({
+        status: 'success',
+        topics: [
+          { rank: 1, searchQuery: 'night before planning', title: 'Plan tomorrow tonight', rationale: 'Strong fit.' },
+          { rank: 2, query: 'night before planning', title: 'Duplicate' },
+        ],
+      }),
+    })).toEqual([
+      expect.objectContaining({ query: 'night before planning', title: 'Plan tomorrow tonight', reason: 'Strong fit.' }),
+    ])
   })
 
   test('stops when adjacent VidIQ research also has no relevant breakout matches', async () => {
@@ -437,9 +487,11 @@ describe('durable ClarityMode Skill assignments', () => {
       vidiq: { queries: ['morning planning'], results: [] },
     }, {
       readCredential: async () => 'vidiq-key',
+      generateTopicCandidates: async () => [],
       researchVidiq: async () => [
         { query: 'night before planning', evidence: { outliers: { videos: [{ title: 'Gaming highlights', outlierScore: 18 }] } } },
       ],
+      evaluateTopicCandidates: async () => [],
     })).rejects.toThrow('original or adjacent topics')
   })
 

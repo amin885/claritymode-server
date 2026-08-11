@@ -8,6 +8,7 @@ const PUBLIC_STATUSES = new Set(['queued', 'working', 'needs_input', 'ready_for_
 const MAX_INPUT_BYTES = 512 * 1024
 const MAX_PROVIDER_BYTES = 2 * 1024 * 1024
 const MINDSTUDIO_REMOTE_PREFIX = '@@remote_variable@@'
+const DEFAULT_TOPIC_RESEARCH_AGENT_ID = '4aeb8cfa-a0ff-4589-96d5-4c96e1f71402'
 let timer = null
 let running = false
 const MAX_TRANSIENT_ATTEMPTS = 3
@@ -35,6 +36,13 @@ function agentConfigFor(row = {}) {
     version: useTestAgent
       ? String(process.env.MINDSTUDIO_YOUTUBE_PRODUCER_TEST_VERSION || '').trim()
       : String(process.env.MINDSTUDIO_YOUTUBE_PRODUCER_VERSION || '').trim(),
+  }
+}
+
+function topicResearchAgentConfig() {
+  return {
+    appId: String(process.env.MINDSTUDIO_TOPIC_RESEARCH_AGENT_ID || DEFAULT_TOPIC_RESEARCH_AGENT_ID).trim(),
+    version: String(process.env.MINDSTUDIO_TOPIC_RESEARCH_VERSION || '').trim(),
   }
 }
 
@@ -355,25 +363,148 @@ function adjacentResearchQueries(result, connectorEvidence) {
     .slice(0, 3)
 }
 
+function unwrapTopicResearchResult(value) {
+  let result = value
+  for (let depth = 0; depth < 8; depth += 1) {
+    result = parseJsonValue(result)
+    if (!result || typeof result !== 'object' || Array.isArray(result)) break
+    if (Array.isArray(result.topics)) return result
+    if (result.result !== undefined) {
+      result = result.result
+      continue
+    }
+    if (result.finalResponse !== undefined) {
+      result = result.finalResponse
+      continue
+    }
+    break
+  }
+  result = parseJsonValue(result)
+  if (!result || typeof result !== 'object' || !Array.isArray(result.topics)) {
+    throw new Error('The topic research worker returned an incomplete result.')
+  }
+  return result
+}
+
+function normalizedTopicWorkerOptions(value, maximum = 20) {
+  const result = unwrapTopicResearchResult(value)
+  const seen = new Set()
+  return result.topics.map((topic, index) => {
+    if (typeof topic === 'string') return { query: cleanOutlineText(topic, 300), title: cleanOutlineText(topic, 300), rank: index + 1 }
+    const query = cleanOutlineText(topic?.searchQuery || topic?.query || topic?.keyword || topic?.topic || topic?.title, 300)
+    return {
+      ...topic,
+      query,
+      title: cleanOutlineText(topic?.title || topic?.topic || query, 300),
+      reason: cleanOutlineText(topic?.reason || topic?.rationale || topic?.tradeoff || '', 1000),
+      rank: Number(topic?.rank) || index + 1,
+    }
+  }).filter(topic => {
+    const key = topic.query.toLowerCase()
+    if (!key || seen.has(key)) return false
+    seen.add(key)
+    return true
+  }).slice(0, maximum)
+}
+
+function topicResearchContext(row = {}) {
+  const profile = row.brief?.channelProfile && typeof row.brief.channelProfile === 'object' ? row.brief.channelProfile : {}
+  const project = row.project_context && typeof row.project_context === 'object' ? row.project_context : {}
+  const seedIdea = cleanOutlineText(row.brief?.seedIdea || row.source_task?.text, 1000)
+  return {
+    businessOffer: cleanOutlineText(profile.helpsPeople || profile.whatTheChannelHelpsPeopleDo || project.overview || project.outcome || row.project_ref?.title, 3000),
+    idealAudience: cleanOutlineText(profile.idealViewer || profile.idealAudience || '', 2000),
+    audienceProblems: cleanOutlineText(profile.problems || profile.audienceProblems || '', 3000),
+    exclusions: cleanOutlineText(profile.exclusions || '', 2000),
+    seedIdea,
+    currentTopic: seedIdea,
+    projectContext: JSON.stringify(project),
+  }
+}
+
+async function invokeTopicResearchWorker(row, operation, variables = {}, deps = {}) {
+  const apiKey = String(process.env.MINDSTUDIO_API_KEY || '').trim()
+  const { appId, version } = topicResearchAgentConfig()
+  if (!apiKey || !appId) throw new Error('The topic research worker is temporarily unavailable.')
+  const loadSdk = deps.loadSdk || (() => import('@mindstudio-ai/agent'))
+  const sdk = await loadSdk()
+  const MindStudioAgent = deps.MindStudioAgent || sdk.MindStudioAgent
+  const client = new MindStudioAgent({ apiKey })
+  const response = await client.runAgent({
+    appId,
+    workflow: 'Main.flow',
+    variables: {
+      operation,
+      ...topicResearchContext(row),
+      ...variables,
+    },
+    ...(version ? { version } : {}),
+  })
+  const currentResult = response && typeof response === 'object' && Object.prototype.hasOwnProperty.call(response, 'result')
+    ? response.result
+    : response
+  return resolveProviderValue(currentResult, deps.fetchImpl || fetch)
+}
+
+async function generateTopicCandidates(row, deps = {}) {
+  const raw = await invokeTopicResearchWorker(row, 'generate_candidates', {}, deps)
+  return normalizedTopicWorkerOptions(raw, 9)
+}
+
+async function evaluateTopicCandidates(row, researchResults, deps = {}) {
+  const raw = await invokeTopicResearchWorker(row, 'evaluate_topics', {
+    vidiqEvidence: JSON.stringify(researchResults || []),
+  }, deps)
+  return normalizedTopicWorkerOptions(raw, 10)
+}
+
+async function researchCandidateBatches(apiKey, queries, research, deps = {}) {
+  const results = []
+  for (let index = 0; index < queries.length; index += 3) {
+    results.push(...await research(apiKey, queries.slice(index, index + 3), deps.fetchImpl))
+  }
+  return results
+}
+
 async function buildVidIQTopicPivot(row, result, connectorEvidence, deps = {}) {
   if (Number(row.brief?.topicPivotCount || 0) >= 1) {
     throw new Error('VidIQ had no usable outlier evidence for the selected alternative topic.')
   }
-  const queries = adjacentResearchQueries(result, connectorEvidence)
-  if (!queries.length) throw new Error('VidIQ had no usable outlier evidence or adjacent keyword opportunities.')
+  let candidateTopics = []
+  const inheritedQueries = adjacentResearchQueries(result, connectorEvidence)
+  if (inheritedQueries.length) {
+    candidateTopics = inheritedQueries.map((query, index) => ({ query, title: query, rank: index + 1 }))
+  }
+  const generated = await (deps.generateTopicCandidates || generateTopicCandidates)(row, deps)
+  const originalQueries = new Set((connectorEvidence?.vidiq?.queries || []).map(query => String(query || '').trim().toLowerCase()))
+  const seen = new Set()
+  candidateTopics = [...candidateTopics, ...generated]
+    .filter(topic => {
+      const key = String(topic?.query || '').trim().toLowerCase()
+      if (!key || originalQueries.has(key) || seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    .slice(0, 6)
+  const queries = candidateTopics.map(topic => topic.query)
+  if (!queries.length) throw new Error('The topic research worker had no adjacent ideas to validate with VidIQ.')
   const apiKey = await (deps.readCredential || readCredential)(row.user_id, 'vidiq')
   if (!apiKey) throw new Error('VidIQ evidence is required before ClarityMode can suggest another topic.')
   const research = deps.researchVidiq || vidiq.research
-  const results = await research(apiKey, queries, deps.fetchImpl)
+  const results = await researchCandidateBatches(apiKey, queries, research, deps)
+  const evaluated = await (deps.evaluateTopicCandidates || evaluateTopicCandidates)(row, results, deps)
+  const evaluatedByQuery = new Map(evaluated.map(topic => [String(topic.query || '').trim().toLowerCase(), topic]))
   const options = results.map(item => {
-    const matches = relevantOutliersForQuery(item.query, item.evidence?.outliers)
+    const evaluatedTopic = evaluatedByQuery.get(String(item.query || '').trim().toLowerCase())
+    if (!evaluatedTopic) return null
+    const matches = outlierCandidates(item.evidence?.outliers, [])
     if (!matches.length) return null
     const strongestScore = matches.map(match => Number(match.score)).filter(Number.isFinite).sort((a, b) => b - a)[0]
     return {
       id: `topic-${Buffer.from(item.query).toString('base64url').slice(0, 16)}`,
-      title: item.query,
+      title: evaluatedTopic.title || item.query,
       query: item.query,
-      reason: `${matches.length} relevant VidIQ breakout ${matches.length === 1 ? 'result' : 'results'} found${strongestScore ? `; strongest outlier score ${strongestScore}x` : ''}.`,
+      reason: evaluatedTopic.reason || `${matches.length} relevant VidIQ breakout ${matches.length === 1 ? 'result' : 'results'} found${strongestScore ? `; strongest outlier score ${strongestScore}x` : ''}.`,
       evidence: matches.slice(0, 3),
     }
   }).filter(Boolean).slice(0, 3)
@@ -703,6 +834,18 @@ async function processAssignment(row, deps = {}) {
     ? { vidiqEvidence: connectorEvidence.vidiq.results }
     : {}
   let humanResponse = current.pending_response || {}
+  if (humanResponse?.findAlternatives === true) {
+    const pivot = await buildVidIQTopicPivot(current, {
+      status: 'failed',
+      stage: String(current.workflow_state?.stage || current.stage || 'choose_supported_topic'),
+      progress: { label: 'Finding stronger topics...' },
+      state: current.workflow_state || {},
+      evidenceUsed: {},
+      artifacts: [],
+    }, connectorEvidence, deps)
+    await persistResult(current, pivot.result, current.provider_thread_id || '', pivot.connectorEvidence)
+    return
+  }
   const selectedPivot = await applyTopicPivotSelection(current, connectorEvidence, humanResponse)
   if (selectedPivot) {
     current = selectedPivot.row
@@ -907,18 +1050,23 @@ module.exports = {
   configured,
   assignmentFailure,
   buildVidIQTopicPivot,
+  evaluateTopicCandidates,
   enforceYouTubeInterviewGate,
   enforceYouTubeVidIQGate,
   hasOutlierEvidence,
   hiddenDirectionResponse,
   invokeAgent,
+  invokeTopicResearchWorker,
   normalizeCreate,
   parseAgentResult,
   persistResult,
   publicAssignment,
+  generateTopicCandidates,
+  normalizedTopicWorkerOptions,
   needsRevisionEvidenceRecovery,
   revisionResearchQueries,
   relevantOutliersForQuery,
+  topicResearchAgentConfig,
   resolveProviderValue,
   start,
   stop,
