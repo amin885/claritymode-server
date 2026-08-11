@@ -73,6 +73,22 @@ function keywordTool(tools) {
     .sort((left, right) => right.score - left.score)[0]?.tool
 }
 
+function outliersTool(tools) {
+  return [...tools]
+    .map(tool => {
+      const name = String(tool?.name || '')
+      const description = String(tool?.description || '')
+      const text = `${name} ${description}`
+      const score = /^vidiq_outliers$/i.test(name) ? 5
+        : /^outliers$/i.test(name) ? 4
+          : /outlier/i.test(text) ? 3
+            : /breakout|overperform/i.test(text) ? 1 : 0
+      return { tool, score }
+    })
+    .filter(item => item.score)
+    .sort((left, right) => right.score - left.score)[0]?.tool
+}
+
 function connectedChannelsTool(tools) {
   return [...tools]
     .map(tool => {
@@ -120,7 +136,9 @@ function argumentsFor(tool, query) {
     else if (/limit|(?:^|[_-])count(?:$|[_-])|maximum|maxresults|max_results/.test(normalized)) {
       const limit = Math.min(10, Number(definition.maximum) || 10)
       args[name] = schemaValue(definition, String(limit), limit)
-    } else if (required.has(name) && definition.default !== undefined) args[name] = definition.default
+    } else if (/short/.test(normalized) && (definition.type === 'boolean' || required.has(name))) args[name] = false
+    else if (/outlier.*score|min.*score|score.*min/.test(normalized)) args[name] = schemaValue(definition, '2', 2)
+    else if (required.has(name) && definition.default !== undefined) args[name] = definition.default
     else if (required.has(name) && Array.isArray(definition.enum) && definition.enum.length) args[name] = definition.enum[0]
   }
   const missing = [...required].filter(name => args[name] === undefined)
@@ -227,6 +245,7 @@ async function readConnectedChannels(apiKey, session, fetchImpl = fetch) {
 async function validate(apiKey, fetchImpl = fetch) {
   const session = await openSession(String(apiKey || '').trim(), fetchImpl)
   if (!keywordTool(session.tools)) throw new Error('VidIQ did not provide keyword research for this account.')
+  if (!outliersTool(session.tools)) throw new Error('VidIQ did not provide outlier research for this account.')
   const channels = await readConnectedChannels(String(apiKey || '').trim(), session, fetchImpl)
   return {
     connected: true,
@@ -237,24 +256,42 @@ async function validate(apiKey, fetchImpl = fetch) {
 }
 
 async function research(apiKey, queries, fetchImpl = fetch) {
-  const cleanQueries = [...new Set((Array.isArray(queries) ? queries : []).map(value => String(value || '').trim()).filter(Boolean))].slice(0, 20)
+  const cleanQueries = [...new Set((Array.isArray(queries) ? queries : []).map(value => String(value || '').trim()).filter(Boolean))].slice(0, 3)
   if (!cleanQueries.length) throw new Error('No VidIQ research queries were provided.')
   const session = await openSession(apiKey, fetchImpl)
-  const tool = keywordTool(session.tools)
-  if (!tool) throw new Error('VidIQ did not provide keyword research for this account.')
+  const keyword = keywordTool(session.tools)
+  const outliers = outliersTool(session.tools)
+  if (!keyword) throw new Error('VidIQ did not provide keyword research for this account.')
+  if (!outliers) throw new Error('VidIQ did not provide outlier research for this account.')
   const results = []
   for (let index = 0; index < cleanQueries.length; index += 1) {
     const query = cleanQueries[index]
-    const response = await rpc({
+    const outlierResponse = await rpc({
       apiKey,
       fetchImpl,
       sessionId: session.sessionId,
-      id: index + 3,
+      id: (index * 2) + 3,
       method: 'tools/call',
-      params: { name: tool.name, arguments: argumentsFor(tool, query) },
+      params: { name: outliers.name, arguments: argumentsFor(outliers, query) },
     })
-    if (response.body?.result?.isError) throw new Error(String(contentValue(response.body.result) || 'VidIQ research failed.'))
-    results.push({ query, tool: tool.name, evidence: contentValue(response.body?.result) })
+    if (outlierResponse.body?.result?.isError) throw new Error(String(contentValue(outlierResponse.body.result) || 'VidIQ outlier research failed.'))
+    const keywordResponse = await rpc({
+      apiKey,
+      fetchImpl,
+      sessionId: session.sessionId,
+      id: (index * 2) + 4,
+      method: 'tools/call',
+      params: { name: keyword.name, arguments: argumentsFor(keyword, query) },
+    })
+    if (keywordResponse.body?.result?.isError) throw new Error(String(contentValue(keywordResponse.body.result) || 'VidIQ keyword research failed.'))
+    results.push({
+      query,
+      tools: { outliers: outliers.name, keyword: keyword.name },
+      evidence: {
+        outliers: contentValue(outlierResponse.body?.result),
+        keyword: contentValue(keywordResponse.body?.result),
+      },
+    })
   }
   return results
 }
@@ -265,6 +302,7 @@ module.exports = {
   connectedChannelsTool,
   normalizeChannelIds,
   normalizeChannels,
+  outliersTool,
   parseSse,
   research,
   validate,

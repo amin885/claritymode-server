@@ -272,17 +272,17 @@ describe('durable ClarityMode Skill assignments', () => {
     const result = {
       status: 'ready_for_review',
       evidenceUsed: { vidiq: { queries: ['wake up at 5am'], summary: 'Low-competition search opportunity.' } },
-      artifacts: [{ content: '# Outline\n\n## VidIQ direction used\nLow-competition search opportunity.' }],
+      artifacts: [{ content: '# Outline\n\n## VidIQ direction used\nLow-competition search opportunity.\n\n## Outlier evidence\nA comparable video reached an 8.4x outlier score.' }],
     }
     expect(() => assignments.enforceYouTubeVidIQGate({}, result, {})).toThrow('usable VidIQ evidence')
     expect(assignments.enforceYouTubeVidIQGate({}, result, {
-      vidiq: { results: [{ query: 'wake up at 5am', evidence: { searchVolume: 1200, competition: 'low' } }] },
+      vidiq: { results: [{ query: 'wake up at 5am', evidence: { outliers: [{ title: 'Breakout', outlierScore: 8.4 }], keyword: { searchVolume: 1200, competition: 'low' } } }] },
     })).toBe(result)
   })
 
   test('requires the final artifact to explain how VidIQ shaped it', () => {
     const evidence = {
-      vidiq: { queries: ['wake up at 5am'], results: [{ query: 'wake up at 5am', evidence: { searchVolume: 1200 } }] },
+      vidiq: { queries: ['wake up at 5am'], results: [{ query: 'wake up at 5am', evidence: { outliers: [{ title: 'Breakout', outlierScore: 8.4 }], keyword: { searchVolume: 1200 } } }] },
     }
     expect(() => assignments.enforceYouTubeVidIQGate({}, {
       status: 'ready_for_review',
@@ -298,7 +298,7 @@ describe('durable ClarityMode Skill assignments', () => {
     expect(assignments.enforceYouTubeVidIQGate({}, {
       status: 'ready_for_review',
       evidenceUsed: {},
-      artifacts: [{ content: '# Outline\n\n## VidIQ direction used\nQuery: wake up at 5am\nDecision: lead with the exact phrase.' }],
+      artifacts: [{ content: '# Outline\n\n## VidIQ direction used\nQuery: wake up at 5am\nDecision: lead with the exact phrase.\n\n## VidIQ outlier evidence\nBreakout reached 8.4x its channel baseline.' }],
     }, evidence)).toMatchObject({ status: 'ready_for_review' })
   })
 

@@ -197,14 +197,19 @@ function enforceYouTubeVidIQGate(row, result, connectorEvidence = {}) {
   if (!vidiq || !Array.isArray(vidiq.results) || !vidiq.results.some(item => usefulEvidence(item?.evidence))) {
     throw new Error('The Skill tried to finish without usable VidIQ evidence.')
   }
+  if (!vidiq.results.some(item => usefulEvidence(item?.evidence?.outliers))) {
+    throw new Error('The Skill tried to finish without usable VidIQ outlier evidence.')
+  }
   const artifactText = result.artifacts.map(artifact => String(artifact?.content || '')).join('\n')
   const hasVisibleEvidence = /^#{1,6}\s+vidiq direction used\s*$/im.test(artifactText)
+  const hasVisibleOutliers = /^#{1,6}\s+(?:vidiq )?outlier (?:evidence|opportunities)\s*$/im.test(artifactText)
   const mentionsAQuery = (Array.isArray(vidiq.queries) ? vidiq.queries : [])
     .some(query => artifactText.toLowerCase().includes(String(query || '').trim().toLowerCase()))
   if (!validVidIQUsage(result.evidenceUsed?.vidiq) && !(hasVisibleEvidence && mentionsAQuery)) {
     throw new Error('The Skill did not explain how it used the VidIQ evidence.')
   }
   if (!hasVisibleEvidence) throw new Error('The Skill did not include its VidIQ direction in the final outline.')
+  if (!hasVisibleOutliers) throw new Error('The Skill did not include the outlier evidence behind its direction.')
   return result
 }
 
