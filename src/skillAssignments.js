@@ -274,6 +274,9 @@ function renderStructuredYouTubeOutline(outline) {
 
 function outlierCandidates(value, results = []) {
   if (!value || results.length >= 5) return results
+  if (typeof value === 'string') {
+    try { return outlierCandidates(JSON.parse(value), results) } catch { return results }
+  }
   if (Array.isArray(value)) {
     for (const item of value) outlierCandidates(item, results)
     return results
@@ -285,6 +288,117 @@ function outlierCandidates(value, results = []) {
   if (title && (score !== undefined || views !== undefined)) results.push({ title, score, views })
   for (const nested of Object.values(value)) outlierCandidates(nested, results)
   return results
+}
+
+const TOPIC_STOP_WORDS = new Set([
+  'a', 'an', 'and', 'are', 'as', 'at', 'be', 'before', 'but', 'by', 'can', 'do', 'for', 'from', 'how', 'i', 'in',
+  'is', 'it', 'of', 'on', 'or', 'that', 'the', 'this', 'to', 'too', 'video', 'what', 'when', 'why', 'with', 'you', 'your',
+])
+
+function topicTokens(value) {
+  return String(value || '').toLowerCase().match(/[a-z0-9]+/g)?.map(token => {
+    if (token.length > 6 && token.endsWith('ing')) return token.slice(0, -3)
+    if (token.length > 5 && token.endsWith('ed')) return token.slice(0, -2)
+    if (token.length > 4 && token.endsWith('s')) return token.slice(0, -1)
+    return token
+  }).filter(token => token.length >= 3 && !TOPIC_STOP_WORDS.has(token)) || []
+}
+
+function relevantOutliersForQuery(query, value) {
+  const queryTerms = [...new Set(topicTokens(query))]
+  if (!queryTerms.length) return []
+  const minimumMatches = queryTerms.length === 1 ? 1 : 2
+  return outlierCandidates(value, []).filter(candidate => {
+    const titleTerms = new Set(topicTokens(candidate.title))
+    return queryTerms.filter(term => titleTerms.has(term)).length >= minimumMatches
+  })
+}
+
+function keywordOpportunityCandidates(value, results = []) {
+  if (!value || results.length >= 30) return results
+  if (typeof value === 'string') {
+    try { return keywordOpportunityCandidates(JSON.parse(value), results) } catch { return results }
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) keywordOpportunityCandidates(item, results)
+    return results
+  }
+  if (typeof value !== 'object') return results
+  const phrase = cleanOutlineText(value.keyword || value.query || value.term || value.phrase || value.topic, 300)
+  if (phrase) {
+    const volume = Number(value.searchVolume ?? value.search_volume ?? value.volume ?? 0) || 0
+    const score = Number(value.opportunityScore ?? value.opportunity_score ?? value.score ?? 0) || 0
+    results.push({ query: phrase, rank: score * 1_000_000 + volume })
+  }
+  for (const nested of Object.values(value)) keywordOpportunityCandidates(nested, results)
+  return results
+}
+
+function adjacentResearchQueries(result, connectorEvidence) {
+  const original = new Set((connectorEvidence?.vidiq?.queries || []).map(item => String(item || '').trim().toLowerCase()))
+  const providerQueries = [
+    ...(Array.isArray(result?.evidenceUsed?.vidiq?.alternativeQueries) ? result.evidenceUsed.vidiq.alternativeQueries : []),
+    ...(Array.isArray(result?.evidenceUsed?.vidiq?.suggestedQueries) ? result.evidenceUsed.vidiq.suggestedQueries : []),
+    ...outlineList(result?.outline?.alternativeTitles || result?.outline?.titleIdeas, 10),
+  ].map(query => ({ query: cleanOutlineText(query, 300), rank: 0 }))
+  const keywordQueries = keywordOpportunityCandidates((connectorEvidence?.vidiq?.results || []).map(item => item?.evidence?.keyword))
+  const seen = new Set()
+  return [...providerQueries, ...keywordQueries]
+    .sort((left, right) => right.rank - left.rank)
+    .map(item => item.query)
+    .filter(query => {
+      const key = query.toLowerCase()
+      if (!query || original.has(key) || seen.has(key) || topicTokens(query).length < 1) return false
+      seen.add(key)
+      return true
+    })
+    .slice(0, 3)
+}
+
+async function buildVidIQTopicPivot(row, result, connectorEvidence, deps = {}) {
+  if (Number(row.brief?.topicPivotCount || 0) >= 1) {
+    throw new Error('VidIQ had no usable outlier evidence for the selected alternative topic.')
+  }
+  const queries = adjacentResearchQueries(result, connectorEvidence)
+  if (!queries.length) throw new Error('VidIQ had no usable outlier evidence or adjacent keyword opportunities.')
+  const apiKey = await (deps.readCredential || readCredential)(row.user_id, 'vidiq')
+  if (!apiKey) throw new Error('VidIQ evidence is required before ClarityMode can suggest another topic.')
+  const research = deps.researchVidiq || vidiq.research
+  const results = await research(apiKey, queries, deps.fetchImpl)
+  const options = results.map(item => {
+    const matches = relevantOutliersForQuery(item.query, item.evidence?.outliers)
+    if (!matches.length) return null
+    const strongestScore = matches.map(match => Number(match.score)).filter(Number.isFinite).sort((a, b) => b - a)[0]
+    return {
+      id: `topic-${Buffer.from(item.query).toString('base64url').slice(0, 16)}`,
+      title: item.query,
+      query: item.query,
+      reason: `${matches.length} relevant VidIQ breakout ${matches.length === 1 ? 'result' : 'results'} found${strongestScore ? `; strongest outlier score ${strongestScore}x` : ''}.`,
+      evidence: matches.slice(0, 3),
+    }
+  }).filter(Boolean).slice(0, 3)
+  if (!options.length) throw new Error('VidIQ had no usable outlier evidence for the original or adjacent topics.')
+  const pivotEvidence = { queries, retrievedAt: new Date().toISOString(), results }
+  return {
+    connectorEvidence: { ...connectorEvidence, vidiqPivot: pivotEvidence },
+    result: {
+      ...result,
+      status: 'needs_input',
+      stage: 'choose_supported_topic',
+      progress: { label: 'The original idea was weak in VidIQ. Choose a stronger evidence-backed direction.' },
+      state: { ...(result.state || {}), topicPivot: { options, evidence: pivotEvidence } },
+      connectorRequest: null,
+      approval: null,
+      question: {
+        id: 'choose-supported-topic',
+        kind: 'topic_choice',
+        prompt: 'VidIQ did not support the original idea. Choose a stronger direction:',
+        options,
+      },
+      artifacts: [],
+      error: null,
+    },
+  }
 }
 
 function renderVidIQPerformanceSection(vidiq, usage) {
@@ -542,6 +656,46 @@ function needsRevisionEvidenceRecovery(row, connectorEvidence = {}, humanRespons
     && revisionResearchQueries(row).length > 0
 }
 
+async function applyTopicPivotSelection(row, connectorEvidence, humanResponse) {
+  const topicId = String(humanResponse?.topicId || '').trim()
+  const pivot = row.workflow_state?.topicPivot
+  if (!topicId || !pivot || !Array.isArray(pivot.options)) return null
+  const selected = pivot.options.find(option => String(option?.id || '') === topicId)
+  if (!selected) throw Object.assign(new Error('Choose one of the supported VidIQ topics.'), { status: 400 })
+  const pivotResults = Array.isArray(pivot.evidence?.results) ? pivot.evidence.results : []
+  const selectedResults = pivotResults.filter(item => String(item?.query || '') === String(selected.query || ''))
+  if (!selectedResults.length || !relevantOutliersForQuery(selected.query, selectedResults[0]?.evidence?.outliers).length) {
+    throw new Error('That topic no longer has usable VidIQ outlier evidence.')
+  }
+  const brief = {
+    ...(row.brief || {}),
+    mode: 'seed',
+    seedIdea: String(selected.title || selected.query || '').trim(),
+    pivotedFrom: String(row.brief?.seedIdea || row.source_task?.text || '').trim(),
+    topicPivotCount: Number(row.brief?.topicPivotCount || 0) + 1,
+  }
+  const nextEvidence = {
+    ...connectorEvidence,
+    vidiq: {
+      queries: [selected.query],
+      retrievedAt: pivot.evidence?.retrievedAt || new Date().toISOString(),
+      results: selectedResults,
+    },
+  }
+  await db.query(
+    `UPDATE skill_assignments
+        SET brief = $2, workflow_state = '{}'::jsonb, connector_evidence = $3,
+            pending_response = NULL, provider_thread_id = NULL,
+            stage = 'queued', progress_label = 'Building from the selected VidIQ opportunity...', updated_at = now()
+      WHERE id = $1`,
+    [row.id, brief, nextEvidence],
+  )
+  return {
+    row: { ...row, brief, workflow_state: {}, connector_evidence: nextEvidence, pending_response: null, provider_thread_id: null },
+    connectorEvidence: nextEvidence,
+  }
+}
+
 async function processAssignment(row, deps = {}) {
   let current = row
   let connectorEvidence = current.connector_evidence && typeof current.connector_evidence === 'object' ? current.connector_evidence : {}
@@ -549,6 +703,13 @@ async function processAssignment(row, deps = {}) {
     ? { vidiqEvidence: connectorEvidence.vidiq.results }
     : {}
   let humanResponse = current.pending_response || {}
+  const selectedPivot = await applyTopicPivotSelection(current, connectorEvidence, humanResponse)
+  if (selectedPivot) {
+    current = selectedPivot.row
+    connectorEvidence = selectedPivot.connectorEvidence
+    connectorResults = { vidiqEvidence: connectorEvidence.vidiq.results }
+    humanResponse = {}
+  }
   if (needsRevisionEvidenceRecovery(current, connectorEvidence, humanResponse)) {
     const apiKey = await readCredential(current.user_id, 'vidiq')
     if (!apiKey) throw new Error('VidIQ evidence is required before this outline can be revised.')
@@ -587,6 +748,13 @@ async function processAssignment(row, deps = {}) {
       continue
     }
     if (result.status !== 'needs_connector') {
+      if (result.status === 'ready_for_review'
+        && declaresNoUsableVidIQOpportunity({ evidenceUsed: result.evidenceUsed?.vidiq, artifacts: result.artifacts })) {
+        const pivot = await buildVidIQTopicPivot(current, result, connectorEvidence, deps)
+        connectorEvidence = pivot.connectorEvidence
+        await persistResult(current, pivot.result, invocation.threadId, connectorEvidence)
+        return
+      }
       const enforced = enforceYouTubeVidIQGate(current, result, connectorEvidence)
       await persistResult(current, enforced, invocation.threadId, connectorEvidence)
       return
@@ -733,9 +901,12 @@ function stop() {
 
 module.exports = {
   SKILL_ID,
+  adjacentResearchQueries,
   agentConfigFor,
+  applyTopicPivotSelection,
   configured,
   assignmentFailure,
+  buildVidIQTopicPivot,
   enforceYouTubeInterviewGate,
   enforceYouTubeVidIQGate,
   hasOutlierEvidence,
@@ -747,6 +918,7 @@ module.exports = {
   publicAssignment,
   needsRevisionEvidenceRecovery,
   revisionResearchQueries,
+  relevantOutliersForQuery,
   resolveProviderValue,
   start,
   stop,

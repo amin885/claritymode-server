@@ -388,6 +388,90 @@ describe('durable ClarityMode Skill assignments', () => {
     expect(enforced.artifacts[0].content).toContain('## Detailed outline')
   })
 
+  test('extracts adjacent VidIQ research directions instead of inventing unsupported topics', () => {
+    const queries = assignments.adjacentResearchQueries({
+      evidenceUsed: { vidiq: { alternativeQueries: ['plan tomorrow tonight'] } },
+    }, {
+      vidiq: {
+        queries: ['morning planning'],
+        results: [{ evidence: { keyword: { relatedKeywords: [
+          { keyword: 'night before planning', searchVolume: 3200, opportunityScore: 72 },
+          { keyword: 'evening planning routine', searchVolume: 1800, opportunityScore: 64 },
+        ] } } }],
+      },
+    })
+    expect(queries).toEqual(['night before planning', 'evening planning routine', 'plan tomorrow tonight'])
+  })
+
+  test('offers only adjacent topics with relevant VidIQ breakout evidence', async () => {
+    const pivot = await assignments.buildVidIQTopicPivot({ user_id: 'user-1', brief: {} }, {
+      status: 'ready_for_review',
+      stage: 'ready_for_review',
+      progress: { label: 'Finished' },
+      state: {},
+      evidenceUsed: { vidiq: { suggestedQueries: ['night before planning', 'morning productivity'] } },
+      artifacts: [{ content: 'No usable outlier evidence for the original topic.' }],
+    }, {
+      vidiq: { queries: ['morning planning'], results: [] },
+    }, {
+      readCredential: async () => 'vidiq-key',
+      researchVidiq: async () => [
+        { query: 'night before planning', evidence: { outliers: { videos: [{ title: 'My Night Before Planning System', outlierScore: 8.2 }] } } },
+        { query: 'morning productivity', evidence: { outliers: { videos: [{ title: 'Canadian Morning News', outlierScore: 12 }] } } },
+      ],
+    })
+    expect(pivot.result).toMatchObject({
+      status: 'needs_input',
+      stage: 'choose_supported_topic',
+      question: { kind: 'topic_choice' },
+    })
+    expect(pivot.result.question.options).toHaveLength(1)
+    expect(pivot.result.question.options[0]).toMatchObject({ title: 'night before planning' })
+    expect(pivot.result.question.options[0].reason).toContain('8.2x')
+  })
+
+  test('stops when adjacent VidIQ research also has no relevant breakout matches', async () => {
+    await expect(assignments.buildVidIQTopicPivot({ user_id: 'user-1', brief: {} }, {
+      evidenceUsed: { vidiq: { suggestedQueries: ['night before planning'] } },
+    }, {
+      vidiq: { queries: ['morning planning'], results: [] },
+    }, {
+      readCredential: async () => 'vidiq-key',
+      researchVidiq: async () => [
+        { query: 'night before planning', evidence: { outliers: { videos: [{ title: 'Gaming highlights', outlierScore: 18 }] } } },
+      ],
+    })).rejects.toThrow('original or adjacent topics')
+  })
+
+  test('restarts the same assignment from the selected evidence-backed topic', async () => {
+    const query = jest.spyOn(db, 'query').mockResolvedValue({ rows: [] })
+    try {
+      const selected = await assignments.applyTopicPivotSelection({
+        id: 'assignment-1',
+        source_task: { text: 'Morning planning' },
+        brief: { seedIdea: 'Morning planning' },
+        workflow_state: {
+          topicPivot: {
+            options: [{ id: 'topic-night', title: 'Plan tomorrow tonight', query: 'night before planning' }],
+            evidence: {
+              retrievedAt: '2026-08-11T12:00:00.000Z',
+              results: [{ query: 'night before planning', evidence: { outliers: { videos: [{ title: 'My Night Before Planning System', outlierScore: 8.2 }] } } }],
+            },
+          },
+        },
+      }, { vidiq: { queries: ['morning planning'], results: [] } }, { topicId: 'topic-night' })
+      expect(selected.row).toMatchObject({
+        brief: { seedIdea: 'Plan tomorrow tonight', pivotedFrom: 'Morning planning', topicPivotCount: 1 },
+        workflow_state: {},
+        pending_response: null,
+      })
+      expect(selected.connectorEvidence.vidiq).toMatchObject({ queries: ['night before planning'] })
+      expect(query).toHaveBeenCalledWith(expect.stringContaining("workflow_state = '{}'::jsonb"), expect.any(Array))
+    } finally {
+      query.mockRestore()
+    }
+  })
+
   test('retries temporary provider failures without exposing provider details', () => {
     const failure = assignments.assignmentFailure(Object.assign(new Error('MindStudio fetch failed: ECONNRESET'), { code: 'ECONNRESET' }), {
       stage: 'await_interview',
