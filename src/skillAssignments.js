@@ -52,6 +52,8 @@ function assignmentFailure(error, row = {}) {
     || normalized.includes('unauthorized') || normalized.includes('forbidden')
     || normalized.includes('quota') || normalized.includes('insufficient credit')
   const missingOutlier = normalized.includes('vidiq outlier evidence')
+    || normalized.includes('no usable outlier evidence')
+    || normalized.includes('no relevant outlier evidence')
   const missingVidIQ = normalized.includes('vidiq evidence') || normalized.includes('vidiq direction')
   const attempt = Number(row.attempt_count || 0) + 1
 
@@ -191,10 +193,37 @@ function usefulEvidence(value) {
 
 function validVidIQUsage(value) {
   if (!value || typeof value !== 'object') return false
+  if (value.hasUsableOutlierEvidence === false || value.usableOpportunity === false) return false
   const queries = Array.isArray(value.queries) ? value.queries.map(item => String(item || '').trim()).filter(Boolean) : []
   const decisions = Array.isArray(value.decisions) ? value.decisions.map(item => String(item || '').trim()).filter(Boolean) : []
   const summary = String(value.summary || value.primaryKeyword || value.titleDecision || '').trim()
   return queries.length > 0 && (decisions.length > 0 || summary.length >= 12)
+}
+
+function declaresNoUsableVidIQOpportunity(value) {
+  const fragments = []
+  const visit = current => {
+    if (current === null || current === undefined) return
+    if (typeof current === 'string') {
+      fragments.push(current)
+      return
+    }
+    if (Array.isArray(current)) {
+      current.forEach(visit)
+      return
+    }
+    if (typeof current === 'object') Object.values(current).forEach(visit)
+  }
+  visit(value)
+  const text = fragments.join(' ').replace(/\s+/g, ' ').toLowerCase()
+  return [
+    /no (?:usable|relevant|meaningful) (?:vidiq |breakout |outlier |keyword )*(?:evidence|data|signal|results?|opportunit(?:y|ies)|outliers?)/,
+    /no .*outliers? relevant to (?:this|the) (?:topic|idea|angle|channel)/,
+    /none (?:of (?:the|these) )?(?:results?|outliers?|videos?) (?:were|was|are|is) relevant/,
+    /(?:outlier|keyword|vidiq) (?:data|evidence|results?) (?:returned|surfaced|provided|found) no (?:usable|relevant|meaningful)/,
+    /no (?:title|hook|positioning|outline|creative) (?:choice|decision|direction).*shaped by vidiq/,
+    /proceed(?:s|ed|ing)? (?:without|on .* rather than) (?:usable |relevant )*(?:vidiq|outlier|keyword|external trend) (?:data|evidence|signal)/,
+  ].some(pattern => pattern.test(text))
 }
 
 function hasOutlierEvidence(results) {
@@ -308,6 +337,9 @@ function enforceYouTubeVidIQGate(row, result, connectorEvidence = {}) {
     throw new Error('The Skill tried to finish without usable VidIQ outlier evidence.')
   }
   const artifactText = result.artifacts.map(artifact => String(artifact?.content || '')).join('\n')
+  if (declaresNoUsableVidIQOpportunity({ evidenceUsed: result.evidenceUsed?.vidiq, artifactText })) {
+    throw new Error('The Skill tried to finish after determining that VidIQ had no usable outlier evidence.')
+  }
   const mentionsAQuery = (Array.isArray(vidiq.queries) ? vidiq.queries : [])
     .some(query => artifactText.toLowerCase().includes(String(query || '').trim().toLowerCase()))
   if (!validVidIQUsage(result.evidenceUsed?.vidiq) && !mentionsAQuery) {
@@ -344,6 +376,9 @@ function hiddenDirectionResponse(result, connectorEvidence = {}) {
   if (result?.status !== 'needs_approval') return null
   if (!hasOutlierEvidence(connectorEvidence.vidiq?.results)) {
     throw new Error('The Skill tried to continue without usable VidIQ outlier evidence.')
+  }
+  if (declaresNoUsableVidIQOpportunity({ evidenceUsed: result.evidenceUsed?.vidiq, approval: result.approval })) {
+    throw new Error('The Skill tried to continue after determining that VidIQ had no usable outlier evidence.')
   }
   return {
     approved: true,

@@ -346,6 +346,24 @@ describe('durable ClarityMode Skill assignments', () => {
     expect(enforced.artifacts[0].content).toContain('## Outlier evidence and reach opportunity')
   })
 
+  test('rejects an outline when the workflow says returned outliers are unrelated', () => {
+    const evidence = {
+      vidiq: { results: [{ query: 'morning planning', evidence: { outliers: [{ title: 'Canadian evening news', outlierScore: 9.2 }] } }] },
+    }
+    const result = {
+      status: 'ready_for_review',
+      evidenceUsed: {
+        vidiq: {
+          queries: ['morning planning'],
+          summary: 'VidIQ returned no productivity or planning outliers relevant to this topic.',
+          decisions: ['Because no usable outlier or keyword evidence was returned, no title or hook was shaped by VidIQ data.'],
+        },
+      },
+      artifacts: [{ content: '# Why Morning Planning Is Too Late\n\n## VidIQ direction used\n\nNone of the outliers were relevant to this topic.\n\n## Outline\n\n' + '- A complete outline point.\n'.repeat(20) }],
+    }
+    expect(() => assignments.enforceYouTubeVidIQGate({}, result, evidence)).toThrow('no usable outlier evidence')
+  })
+
   test('renders a structured outline into canonical Markdown owned by ClarityMode', () => {
     const evidence = {
       vidiq: { results: [{ query: 'morning planning', evidence: { outliers: [{ title: 'Plan Tonight', outlierScore: 7.1, views: 420000 }] } }] },
@@ -404,6 +422,14 @@ describe('durable ClarityMode Skill assignments', () => {
 
   test('stops cleanly when VidIQ has no breakout opportunity', () => {
     const failure = assignments.assignmentFailure(new Error('The Skill tried to continue without usable VidIQ outlier evidence.'), { stage: 'await_outline' })
+    expect(failure.public).toEqual({
+      code: 'vidiq_opportunity_missing',
+      message: 'VidIQ did not find enough breakout evidence for this topic. Try a broader or adjacent idea.',
+    })
+  })
+
+  test('stops cleanly when research returned records but the workflow found them irrelevant', () => {
+    const failure = assignments.assignmentFailure(new Error('The Skill tried to finish after determining that VidIQ had no usable outlier evidence.'), { stage: 'await_outline' })
     expect(failure.public).toEqual({
       code: 'vidiq_opportunity_missing',
       message: 'VidIQ did not find enough breakout evidence for this topic. Try a broader or adjacent idea.',
