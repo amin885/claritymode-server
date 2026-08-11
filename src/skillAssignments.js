@@ -4,7 +4,7 @@ const vidiq = require('./vidiqConnector')
 
 const SKILL_ID = 'claritymode-youtube-script-producer'
 const VALID_RESULTS = new Set(['working', 'needs_connector', 'needs_approval', 'needs_input', 'ready_for_review', 'failed'])
-const PUBLIC_STATUSES = new Set(['queued', 'working', 'needs_approval', 'needs_input', 'ready_for_review', 'accepted', 'failed', 'cancelled'])
+const PUBLIC_STATUSES = new Set(['queued', 'working', 'needs_input', 'ready_for_review', 'accepted', 'failed', 'cancelled'])
 const MAX_INPUT_BYTES = 512 * 1024
 const MAX_PROVIDER_BYTES = 2 * 1024 * 1024
 const MINDSTUDIO_REMOTE_PREFIX = '@@remote_variable@@'
@@ -51,6 +51,7 @@ function assignmentFailure(error, row = {}) {
   const unavailable = normalized.includes('401') || normalized.includes('403')
     || normalized.includes('unauthorized') || normalized.includes('forbidden')
     || normalized.includes('quota') || normalized.includes('insufficient credit')
+  const missingOutlier = normalized.includes('vidiq outlier evidence')
   const missingVidIQ = normalized.includes('vidiq evidence') || normalized.includes('vidiq direction')
   const attempt = Number(row.attempt_count || 0) + 1
 
@@ -66,7 +67,9 @@ function assignmentFailure(error, row = {}) {
       attempt,
       recordedAt: new Date().toISOString(),
     },
-    public: missingVidIQ
+    public: missingOutlier
+      ? { code: 'vidiq_opportunity_missing', message: 'VidIQ did not find enough breakout evidence for this topic. Try a broader or adjacent idea.' }
+      : missingVidIQ
       ? { code: 'vidiq_evidence_missing', message: 'VidIQ did not return usable research for this outline. Your work was preserved; try again.' }
       : unreadable
       ? { code: 'incomplete_result', message: 'ClarityMode received an incomplete result. Your work was preserved; try again.' }
@@ -205,15 +208,21 @@ function enforceYouTubeVidIQGate(row, result, connectorEvidence = {}) {
     throw new Error('The Skill tried to finish without usable VidIQ outlier evidence.')
   }
   const artifactText = result.artifacts.map(artifact => String(artifact?.content || '')).join('\n')
-  const hasVisibleEvidence = /^#{1,6}\s+vidiq direction used\s*$/im.test(artifactText)
-  const hasVisibleOutliers = /^#{1,6}\s+(?:vidiq )?outlier (?:evidence|opportunities)\s*$/im.test(artifactText)
+  const requiredSections = [
+    'why this idea can perform',
+    'alternative title ideas',
+    'three hook options',
+    'core argument',
+    'detailed outline',
+    'closing and call to action',
+  ]
+  const missingSection = requiredSections.find(section => !new RegExp(`^#{1,6}\\s+${section}\\s*$`, 'im').test(artifactText))
   const mentionsAQuery = (Array.isArray(vidiq.queries) ? vidiq.queries : [])
     .some(query => artifactText.toLowerCase().includes(String(query || '').trim().toLowerCase()))
-  if (!validVidIQUsage(result.evidenceUsed?.vidiq) && !(hasVisibleEvidence && mentionsAQuery)) {
+  if (!validVidIQUsage(result.evidenceUsed?.vidiq) && !mentionsAQuery) {
     throw new Error('The Skill did not explain how it used the VidIQ evidence.')
   }
-  if (!hasVisibleEvidence) throw new Error('The Skill did not include its VidIQ direction in the final outline.')
-  if (!hasVisibleOutliers) throw new Error('The Skill did not include the outlier evidence behind its direction.')
+  if (missingSection) throw new Error(`The Skill did not include the required ${missingSection} section.`)
   return result
 }
 
@@ -238,6 +247,17 @@ function enforceYouTubeInterviewGate(row, result) {
     },
     artifacts: [],
     error: null,
+  }
+}
+
+function hiddenDirectionResponse(result, connectorEvidence = {}) {
+  if (result?.status !== 'needs_approval') return null
+  if (!hasOutlierEvidence(connectorEvidence.vidiq?.results)) {
+    throw new Error('The Skill tried to continue without usable VidIQ outlier evidence.')
+  }
+  return {
+    approved: true,
+    direction: result.approval?.data || result.approval || {},
   }
 }
 
@@ -423,9 +443,24 @@ async function processAssignment(row, deps = {}) {
     )
     current = { ...current, connector_evidence: connectorEvidence }
   }
-  for (let pass = 0; pass < 4; pass += 1) {
+  for (let pass = 0; pass < 6; pass += 1) {
     const invocation = await invokeAgent(current, { connectorResults, humanResponse }, deps)
     const result = enforceYouTubeInterviewGate(current, invocation.result)
+    // Older workflow revisions paused for a separate direction approval. That
+    // gate is intentionally internal now: VidIQ evidence and the interview
+    // shape the outline, while the user reviews only the finished deliverable.
+    if (result.status === 'needs_approval') {
+      const response = hiddenDirectionResponse(result, connectorEvidence)
+      current = {
+        ...current,
+        workflow_state: result.state,
+        connector_evidence: connectorEvidence,
+        pending_response: null,
+      }
+      connectorResults = { vidiqEvidence: connectorEvidence.vidiq.results }
+      humanResponse = response
+      continue
+    }
     if (result.status !== 'needs_connector') {
       const enforced = enforceYouTubeVidIQGate(current, result, connectorEvidence)
       await persistResult(current, enforced, invocation.threadId, connectorEvidence)
@@ -579,6 +614,7 @@ module.exports = {
   enforceYouTubeInterviewGate,
   enforceYouTubeVidIQGate,
   hasOutlierEvidence,
+  hiddenDirectionResponse,
   invokeAgent,
   normalizeCreate,
   parseAgentResult,

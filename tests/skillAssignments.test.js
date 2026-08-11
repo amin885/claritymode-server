@@ -268,11 +268,23 @@ describe('durable ClarityMode Skill assignments', () => {
     expect(assignments.enforceYouTubeInterviewGate({ brief: {} }, approval)).toBe(approval)
   })
 
+  test('consumes the legacy direction gate internally only after VidIQ outliers exist', () => {
+    const result = {
+      status: 'needs_approval',
+      approval: { data: { angle: 'A supported angle' } },
+    }
+    expect(() => assignments.hiddenDirectionResponse(result, {})).toThrow('outlier evidence')
+    expect(assignments.hiddenDirectionResponse(result, {
+      vidiq: { results: [{ evidence: { outliers: [{ title: 'Breakout video', outlierScore: 6.2 }] } }] },
+    })).toEqual({ approved: true, direction: { angle: 'A supported angle' } })
+  })
+
   test('requires durable VidIQ evidence before an outline can be reviewed', () => {
+    const completeOutline = '# Wake up at 5am\n\n## Why this idea can perform\nThe wake up at 5am query has breakout evidence.\n\n## Alternative title ideas\n- A second title\n\n## Three hook options\n- Hook one\n- Hook two\n- Hook three\n\n## Core argument\nUse environmental cues.\n\n## Detailed outline\n- Start here.\n\n## Closing and call to action\nJoin the workshop.'
     const result = {
       status: 'ready_for_review',
       evidenceUsed: { vidiq: { queries: ['wake up at 5am'], summary: 'Low-competition search opportunity.' } },
-      artifacts: [{ content: '# Outline\n\n## VidIQ direction used\nLow-competition search opportunity.\n\n## Outlier evidence\nA comparable video reached an 8.4x outlier score.' }],
+      artifacts: [{ content: completeOutline }],
     }
     expect(() => assignments.enforceYouTubeVidIQGate({}, result, {})).toThrow('usable VidIQ evidence')
     expect(assignments.enforceYouTubeVidIQGate({}, result, {
@@ -302,12 +314,12 @@ describe('durable ClarityMode Skill assignments', () => {
       status: 'ready_for_review',
       evidenceUsed: { vidiq: { queries: ['wake up at 5am'], decisions: ['Use the exact phrase in the title.'] } },
       artifacts: [{ content: '# Outline without the evidence section' }],
-    }, evidence)).toThrow('include its VidIQ direction')
+    }, evidence)).toThrow('required why this idea can perform section')
 
     expect(assignments.enforceYouTubeVidIQGate({}, {
       status: 'ready_for_review',
       evidenceUsed: {},
-      artifacts: [{ content: '# Outline\n\n## VidIQ direction used\nQuery: wake up at 5am\nDecision: lead with the exact phrase.\n\n## VidIQ outlier evidence\nBreakout reached 8.4x its channel baseline.' }],
+      artifacts: [{ content: '# Wake up at 5am\n\n## Why this idea can perform\nThe wake up at 5am query has an 8.4x breakout.\n\n## Alternative title ideas\n- A second title\n\n## Three hook options\n- Hook one\n- Hook two\n- Hook three\n\n## Core argument\nUse environmental cues.\n\n## Detailed outline\n- Start here.\n\n## Closing and call to action\nJoin the workshop.' }],
     }, evidence)).toMatchObject({ status: 'ready_for_review' })
   })
 
@@ -340,6 +352,14 @@ describe('durable ClarityMode Skill assignments', () => {
     expect(failure.public).toEqual({
       code: 'vidiq_evidence_missing',
       message: 'VidIQ did not return usable research for this outline. Your work was preserved; try again.',
+    })
+  })
+
+  test('stops cleanly when VidIQ has no breakout opportunity', () => {
+    const failure = assignments.assignmentFailure(new Error('The Skill tried to continue without usable VidIQ outlier evidence.'), { stage: 'await_outline' })
+    expect(failure.public).toEqual({
+      code: 'vidiq_opportunity_missing',
+      message: 'VidIQ did not find enough breakout evidence for this topic. Try a broader or adjacent idea.',
     })
   })
 

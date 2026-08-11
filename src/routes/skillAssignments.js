@@ -181,7 +181,7 @@ router.post('/:id/respond', async (req, res) => {
               END,
               approval = NULL, question = NULL,
               progress_label = 'ClarityMode is continuing...', updated_at = now()
-        WHERE id = $1 AND user_id = $2 AND status IN ('needs_approval', 'needs_input', 'ready_for_review', 'failed')
+        WHERE id = $1 AND user_id = $2 AND status IN ('needs_input', 'ready_for_review', 'failed')
         RETURNING *`,
       [req.params.id, req.user.sub, response],
     )

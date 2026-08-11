@@ -322,6 +322,32 @@ $skill$,
         ADD COLUMN IF NOT EXISTS connector_evidence JSONB NOT NULL DEFAULT '{}'::jsonb`,
     ],
   },
+  {
+    version: 13,
+    name: 'youtube-outline-single-review-gate',
+    statements: [
+      `UPDATE v2_skills
+          SET description = 'Turn a rough video idea into an outlier-informed, research-backed YouTube outline with one final human review.',
+              version = '0.3.0',
+              content = $skill$# YouTube Outline Builder
+
+This contained ClarityMode product skill checks VidIQ opportunity evidence, asks a short creator interview, then produces three hooks and a detailed Markdown outline for final review.
+
+ClarityMode owns the assignment envelope and final review. The user connects their own VidIQ account for read-only YouTube evidence. The execution provider remains hidden and replaceable.
+$skill$,
+              summary = 'A contained project workflow for VidIQ opportunity validation, a brief creator interview, and an outlier-informed YouTube outline.',
+              updated_at = now()
+        WHERE id = 'claritymode-youtube-script-producer'`,
+      `UPDATE skill_assignments
+          SET status = 'queued',
+              pending_response = jsonb_build_object('approved', true, 'direction', COALESCE(approval->'data', approval, '{}'::jsonb)),
+              approval = NULL,
+              progress_label = 'ClarityMode is building the outline...',
+              updated_at = now()
+        WHERE skill_id = 'claritymode-youtube-script-producer'
+          AND status = 'needs_approval'`,
+    ],
+  },
 ]
 
 async function runMigrations(db) {
