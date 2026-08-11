@@ -191,13 +191,17 @@ function validVidIQUsage(value) {
   return queries.length > 0 && (decisions.length > 0 || summary.length >= 12)
 }
 
+function hasOutlierEvidence(results) {
+  return Array.isArray(results) && results.some(item => usefulEvidence(item?.evidence?.outliers))
+}
+
 function enforceYouTubeVidIQGate(row, result, connectorEvidence = {}) {
   if (result.status !== 'ready_for_review') return result
   const vidiq = connectorEvidence.vidiq || row.connector_evidence?.vidiq
   if (!vidiq || !Array.isArray(vidiq.results) || !vidiq.results.some(item => usefulEvidence(item?.evidence))) {
     throw new Error('The Skill tried to finish without usable VidIQ evidence.')
   }
-  if (!vidiq.results.some(item => usefulEvidence(item?.evidence?.outliers))) {
+  if (!hasOutlierEvidence(vidiq.results)) {
     throw new Error('The Skill tried to finish without usable VidIQ outlier evidence.')
   }
   const artifactText = result.artifacts.map(artifact => String(artifact?.content || '')).join('\n')
@@ -389,7 +393,7 @@ function needsRevisionEvidenceRecovery(row, connectorEvidence = {}, humanRespons
   const isRevisionResume = workflowStage === 'ready_for_review'
     && (Boolean(String(humanResponse?.revisionNotes || '').trim()) || humanResponse?.retry === true)
   return isRevisionResume
-    && !connectorEvidence.vidiq?.results?.some(item => usefulEvidence(item?.evidence))
+    && !hasOutlierEvidence(connectorEvidence.vidiq?.results)
     && revisionResearchQueries(row).length > 0
 }
 
@@ -444,7 +448,18 @@ async function processAssignment(row, deps = {}) {
     }
     const requestedQueries = result.connectorRequest.queries
     const cached = connectorEvidence.vidiq
-    const results = cached && sameQueries(cached.queries, requestedQueries) && Array.isArray(cached.results)
+    const canReuseCachedOpportunity = cached
+      && sameQueries(cached.queries, requestedQueries)
+      && hasOutlierEvidence(cached.results)
+    if (!canReuseCachedOpportunity) {
+      await db.query(
+        `UPDATE skill_assignments
+            SET progress_label = 'Finding VidIQ outliers and keyword opportunities...', updated_at = now()
+          WHERE id = $1`,
+        [current.id],
+      )
+    }
+    const results = canReuseCachedOpportunity
       ? cached.results
       : await vidiq.research(apiKey, requestedQueries, deps.fetchImpl)
     connectorEvidence = {
@@ -563,6 +578,7 @@ module.exports = {
   assignmentFailure,
   enforceYouTubeInterviewGate,
   enforceYouTubeVidIQGate,
+  hasOutlierEvidence,
   invokeAgent,
   normalizeCreate,
   parseAgentResult,

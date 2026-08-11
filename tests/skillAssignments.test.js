@@ -280,6 +280,15 @@ describe('durable ClarityMode Skill assignments', () => {
     })).toBe(result)
   })
 
+  test('distinguishes genuine outlier research from legacy keyword-only evidence', () => {
+    expect(assignments.hasOutlierEvidence([
+      { query: 'wake up at 5am', evidence: { keyword: { searchVolume: 1200, competition: 'low' } } },
+    ])).toBe(false)
+    expect(assignments.hasOutlierEvidence([
+      { query: 'wake up at 5am', evidence: { outliers: [{ title: 'Breakout', outlierScore: 8.4 }] } },
+    ])).toBe(true)
+  })
+
   test('requires the final artifact to explain how VidIQ shaped it', () => {
     const evidence = {
       vidiq: { queries: ['wake up at 5am'], results: [{ query: 'wake up at 5am', evidence: { outliers: [{ title: 'Breakout', outlierScore: 8.4 }], keyword: { searchVolume: 1200 } } }] },
