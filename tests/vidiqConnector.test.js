@@ -1,6 +1,27 @@
 const vidiq = require('../src/vidiqConnector')
 
 describe('VidIQ connected channel discovery', () => {
+  test('respects boolean schema fields whose names contain query-like words', () => {
+    const args = vidiq.argumentsFor({
+      name: 'vidiq_outliers',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          query: { type: 'string' },
+          requireAllTitleTerms: { type: 'boolean' },
+          minOutlierScore: { type: 'number' },
+        },
+        required: ['query', 'requireAllTitleTerms'],
+      },
+    }, 'productivity tools')
+
+    expect(args).toEqual({
+      query: 'productivity tools',
+      requireAllTitleTerms: false,
+      minOutlierScore: 2,
+    })
+  })
+
   test('prefers VidIQ outlier research over generic video search', () => {
     const tool = vidiq.outliersTool([
       { name: 'youtube_search', description: 'Search YouTube videos.' },

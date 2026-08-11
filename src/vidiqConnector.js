@@ -130,7 +130,11 @@ function argumentsFor(tool, query) {
   const args = {}
   for (const [name, definition = {}] of Object.entries(properties)) {
     const normalized = name.toLowerCase()
-    if (/keyword|query|topic|search|term|phrase/.test(normalized)) args[name] = definition.type === 'array' ? [query] : query
+    const types = Array.isArray(definition.type) ? definition.type : [definition.type]
+    if (types.includes('boolean')) {
+      if (typeof definition.default === 'boolean') args[name] = definition.default
+      else if (required.has(name)) args[name] = false
+    } else if (/keyword|query|topic|search|term|phrase/.test(normalized)) args[name] = types.includes('array') ? [query] : query
     else if (/language|locale/.test(normalized)) args[name] = schemaValue(definition, 'en', 0)
     else if (/country|region|location/.test(normalized)) args[name] = schemaValue(definition, 'CA', 0)
     else if (/limit|(?:^|[_-])count(?:$|[_-])|maximum|maxresults|max_results/.test(normalized)) {
