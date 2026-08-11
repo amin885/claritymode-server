@@ -2,6 +2,47 @@ const assignments = require('../src/skillAssignments')
 const db = require('../src/db')
 
 describe('durable ClarityMode Skill assignments', () => {
+  test('routes only explicitly listed users to the test workflow', () => {
+    const original = {
+      agentId: process.env.MINDSTUDIO_YOUTUBE_PRODUCER_AGENT_ID,
+      version: process.env.MINDSTUDIO_YOUTUBE_PRODUCER_VERSION,
+      testAgentId: process.env.MINDSTUDIO_YOUTUBE_PRODUCER_TEST_AGENT_ID,
+      testVersion: process.env.MINDSTUDIO_YOUTUBE_PRODUCER_TEST_VERSION,
+      testUserIds: process.env.MINDSTUDIO_YOUTUBE_PRODUCER_TEST_USER_IDS,
+    }
+    process.env.MINDSTUDIO_YOUTUBE_PRODUCER_AGENT_ID = 'production-agent'
+    process.env.MINDSTUDIO_YOUTUBE_PRODUCER_VERSION = 'production-version'
+    process.env.MINDSTUDIO_YOUTUBE_PRODUCER_TEST_AGENT_ID = 'test-agent'
+    process.env.MINDSTUDIO_YOUTUBE_PRODUCER_TEST_VERSION = 'test-version'
+    process.env.MINDSTUDIO_YOUTUBE_PRODUCER_TEST_USER_IDS = 'user-a, user-b'
+
+    try {
+      expect(assignments.agentConfigFor({ user_id: 'user-a' })).toEqual({
+        appId: 'test-agent',
+        version: 'test-version',
+      })
+      expect(assignments.agentConfigFor({ user_id: 'user-c' })).toEqual({
+        appId: 'production-agent',
+        version: 'production-version',
+      })
+      expect(assignments.agentConfigFor({})).toEqual({
+        appId: 'production-agent',
+        version: 'production-version',
+      })
+    } finally {
+      for (const [key, value] of Object.entries({
+        MINDSTUDIO_YOUTUBE_PRODUCER_AGENT_ID: original.agentId,
+        MINDSTUDIO_YOUTUBE_PRODUCER_VERSION: original.version,
+        MINDSTUDIO_YOUTUBE_PRODUCER_TEST_AGENT_ID: original.testAgentId,
+        MINDSTUDIO_YOUTUBE_PRODUCER_TEST_VERSION: original.testVersion,
+        MINDSTUDIO_YOUTUBE_PRODUCER_TEST_USER_IDS: original.testUserIds,
+      })) {
+        if (value === undefined) delete process.env[key]
+        else process.env[key] = value
+      }
+    }
+  })
+
   test('normalizes a task-backed assignment without provider details', () => {
     const input = assignments.normalizeCreate({
       id: '123e4567-e89b-12d3-a456-426614174000',

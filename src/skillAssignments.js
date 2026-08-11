@@ -20,6 +20,24 @@ function configured() {
   )
 }
 
+function commaSeparatedSet(value) {
+  return new Set(String(value || '').split(',').map(item => item.trim()).filter(Boolean))
+}
+
+function agentConfigFor(row = {}) {
+  const testAgentId = String(process.env.MINDSTUDIO_YOUTUBE_PRODUCER_TEST_AGENT_ID || '').trim()
+  const testUserIds = commaSeparatedSet(process.env.MINDSTUDIO_YOUTUBE_PRODUCER_TEST_USER_IDS)
+  const useTestAgent = Boolean(testAgentId && testUserIds.has(String(row.user_id || '').trim()))
+  return {
+    appId: useTestAgent
+      ? testAgentId
+      : String(process.env.MINDSTUDIO_YOUTUBE_PRODUCER_AGENT_ID || '').trim(),
+    version: useTestAgent
+      ? String(process.env.MINDSTUDIO_YOUTUBE_PRODUCER_TEST_VERSION || '').trim()
+      : String(process.env.MINDSTUDIO_YOUTUBE_PRODUCER_VERSION || '').trim(),
+  }
+}
+
 function assignmentFailure(error, row = {}) {
   const message = String(error?.message || error || 'Unknown assignment error').slice(0, 2_000)
   const code = String(error?.code || error?.status || '').slice(0, 120)
@@ -267,7 +285,7 @@ async function resolveProviderValue(value, fetchImpl = fetch, remoteDepth = 0, s
 
 async function invokeAgent(row, { connectorResults = {}, humanResponse = {} } = {}, deps = {}) {
   const apiKey = String(process.env.MINDSTUDIO_API_KEY || '').trim()
-  const appId = String(process.env.MINDSTUDIO_YOUTUBE_PRODUCER_AGENT_ID || '').trim()
+  const { appId, version } = agentConfigFor(row)
   if (!apiKey || !appId) throw new Error('This ClarityMode Skill is temporarily unavailable.')
   const loadSdk = deps.loadSdk || (() => import('@mindstudio-ai/agent'))
   const sdk = await loadSdk()
@@ -289,9 +307,7 @@ async function invokeAgent(row, { connectorResults = {}, humanResponse = {} } = 
       connectorResults: JSON.stringify(connectorResults || {}),
       humanResponse: JSON.stringify(humanResponse || {}),
     },
-    ...(String(process.env.MINDSTUDIO_YOUTUBE_PRODUCER_VERSION || '').trim()
-      ? { version: String(process.env.MINDSTUDIO_YOUTUBE_PRODUCER_VERSION).trim() }
-      : {}),
+    ...(version ? { version } : {}),
   })
   // MindStudio may include older thread messages alongside the current result.
   // Those messages can contain expired private large-file references. They are
@@ -537,6 +553,7 @@ function stop() {
 
 module.exports = {
   SKILL_ID,
+  agentConfigFor,
   configured,
   assignmentFailure,
   enforceYouTubeInterviewGate,
