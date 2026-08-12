@@ -19,6 +19,7 @@ describe('numbered database migrations', () => {
     expect(migrations[13].statements.join('\n')).toContain('manifest JSONB')
     expect(migrations[14].statements.join('\n')).toContain("provider = 'mastra'")
     expect(migrations[14].statements.join('\n')).toContain('claritymode-youtube-outline-mastra-test')
+    expect(migrations[14].statements.join('\n')).not.toContain('$manifest$')
     expect(migrations[10].statements.join('\n')).toContain('internal_error')
   })
 
