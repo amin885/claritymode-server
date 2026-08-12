@@ -402,6 +402,29 @@ $skill$,
         WHERE 'claritymode-youtube-outline-mastra-test' = ANY(enabled_v2_skills)`,
     ],
   },
+  {
+    version: 16,
+    name: 'skill-work-plan-manifests',
+    statements: [
+      `UPDATE v2_skills
+          SET manifest = jsonb_set(manifest, '{workPlan}', '${JSON.stringify([
+            { id: 'collect-perspective', label: 'Capture your perspective', owner: 'claritymode' },
+            { id: 'research-opportunity', label: 'Research the YouTube opportunity', owner: 'claritymode' },
+            { id: 'build-outline', label: 'Build the detailed outline', owner: 'claritymode' },
+            { id: 'review-outline', label: 'Review and accept the outline', owner: 'user' },
+          ]).replace(/'/g, "''")}'::jsonb, true),
+              updated_at = now()
+        WHERE id = 'claritymode-youtube-script-producer'`,
+      `UPDATE v2_skills
+          SET manifest = jsonb_set(manifest, '{workPlan}', '${JSON.stringify([
+            { id: 'collect-focus', label: 'Confirm the research focus', owner: 'claritymode' },
+            { id: 'prepare-draft', label: 'Research and prepare the company brief', owner: 'claritymode' },
+            { id: 'review-draft', label: 'Review and accept the company brief', owner: 'user' },
+          ]).replace(/'/g, "''")}'::jsonb, true),
+              updated_at = now()
+        WHERE provider = 'mastra' AND provider_app_id = 'company-research'`,
+    ],
+  },
 ]
 
 async function runMigrations(db) {

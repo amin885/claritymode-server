@@ -144,3 +144,17 @@ test('normalizes personal pinned-project change records without accepting device
     },
   })
 })
+
+test('normalizes personal project view state without accepting unsafe paths', () => {
+  expect(normalizeChanges({
+    projectViews: { entries: [
+      { path: 'Projects/Camping.md', areaFilter: 'done', taskFilters: { open: false, done: true }, collapsedKeys: ['assignment-one', 'assignment-one', 'project-area--Packing'], changedAt: '2026-08-12T12:00:00Z', deviceId: 'device-one' },
+      { path: '../Outside', areaFilter: 'anything', collapsedKeys: ['bad'] },
+    ] },
+  })).toEqual({
+    projectViews: { entries: [{
+      path: 'Projects/Camping', areaFilter: 'done', taskFilters: { open: false, done: true },
+      collapsedKeys: ['assignment-one', 'project-area--Packing'], changedAt: '2026-08-12T12:00:00Z', deviceId: 'device-one',
+    }] },
+  })
+})

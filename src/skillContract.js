@@ -6,6 +6,7 @@ const OUTPUT_TYPES = new Set(['markdown', 'plain_text', 'structured_list', 'file
 const RESPONSE_STATUSES = new Set(['working', 'needs_input', 'needs_connector', 'ready_for_review', 'completed', 'failed', 'cancelled'])
 const MAX_ARTIFACTS = 40
 const MAX_ARTIFACT_TEXT = 500_000
+const WORK_PLAN_OWNERS = new Set(['claritymode', 'user'])
 
 function contractError(message) {
   return Object.assign(new Error(message), { status: 400 })
@@ -77,6 +78,23 @@ function normalizeConnectors(connectors) {
   })
 }
 
+function normalizeWorkPlan(workPlan) {
+  const values = Array.isArray(workPlan) ? workPlan : []
+  if (values.length > 30) throw contractError('A Skill work plan can contain at most 30 steps.')
+  const seen = new Set()
+  return values.map((step, index) => {
+    if (!step || typeof step !== 'object' || Array.isArray(step)) throw contractError(`Work plan step ${index + 1} is invalid.`)
+    const id = identifier(step.id, 'Work plan step id')
+    const label = text(step.label, 240)
+    const owner = text(step.owner || 'claritymode', 40)
+    if (!label) throw contractError(`Work plan step ${index + 1} needs a label.`)
+    if (!WORK_PLAN_OWNERS.has(owner)) throw contractError(`Work plan step ${id} has an unsupported owner.`)
+    if (seen.has(id)) throw contractError('Work plan step ids must be unique.')
+    seen.add(id)
+    return { id, label, owner }
+  })
+}
+
 function validateManifest(value, expectedSkillId = '') {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw contractError('A Skill manifest is required.')
   const contractVersion = text(value.contractVersion, 20)
@@ -100,6 +118,7 @@ function validateManifest(value, expectedSkillId = '') {
     inputs: normalizeFields(value.inputs, 'Input'),
     outputs,
     connectors: normalizeConnectors(value.connectors),
+    workPlan: normalizeWorkPlan(value.workPlan),
     completion: {
       requiresAcceptance: completion.requiresAcceptance !== false,
       completeSourceTaskOnAcceptance: Boolean(completion.completeSourceTaskOnAcceptance),
@@ -192,8 +211,13 @@ function validateProviderResponse(value) {
     status,
     stateToken: value.stateToken == null ? null : text(value.stateToken, 20_000),
     progress: value.progress && typeof value.progress === 'object'
-      ? { label: text(value.progress.label || 'ClarityMode is working...', 300) }
-      : { label: 'ClarityMode is working...' },
+      ? {
+          label: text(value.progress.label || 'ClarityMode is working...', 300),
+          currentStepId: value.progress.currentStepId ? identifier(value.progress.currentStepId, 'Current work plan step id') : '',
+          completedStepIds: [...new Set((Array.isArray(value.progress.completedStepIds) ? value.progress.completedStepIds : [])
+            .slice(0, 30).map(stepId => identifier(stepId, 'Completed work plan step id')))],
+        }
+      : { label: 'ClarityMode is working...', currentStepId: '', completedStepIds: [] },
     inputRequest: null,
     connectorRequest: null,
     review: null,

@@ -55,6 +55,7 @@ function publicAssignment(row) {
     status: PUBLIC_STATUSES.has(row.status) ? row.status : 'failed',
     stage: row.stage,
     progressLabel: row.progress_label,
+    progress: row.workflow_state?.progress || { label: row.progress_label, currentStepId: '', completedStepIds: [] },
     approval: row.approval,
     question: row.question,
     artifacts: Array.isArray(row.artifacts) ? row.artifacts : [],
@@ -151,7 +152,7 @@ async function persistContractResult(row, result, providerThreadId, connectorEvi
     [
       row.id, status === 'working' ? 'queued' : status, result.status,
       String(result.progress?.label || 'ClarityMode is working...').slice(0, 500),
-      { contractVersion: '1', stateToken: result.stateToken || '' }, result.connectorRequest,
+      { contractVersion: '1', stateToken: result.stateToken || '', progress: result.progress || {} }, result.connectorRequest,
       approval, question, JSON.stringify(artifacts), result.error, providerThreadId, connectorEvidence,
     ],
   )
@@ -190,9 +191,9 @@ async function processContractAssignment(row, deps = {}) {
           SET workflow_state = $2, connector_evidence = $3, provider_thread_id = $4,
               progress_label = 'Connected research received; continuing...', updated_at = now()
         WHERE id = $1`,
-      [current.id, { contractVersion: '1', stateToken: result.stateToken || '' }, evidence, invocation.threadId],
+      [current.id, { contractVersion: '1', stateToken: result.stateToken || '', progress: result.progress || {} }, evidence, invocation.threadId],
     )
-    current = { ...current, workflow_state: { contractVersion: '1', stateToken: result.stateToken || '' }, connector_evidence: evidence, pending_response: null }
+    current = { ...current, workflow_state: { contractVersion: '1', stateToken: result.stateToken || '', progress: result.progress || {} }, connector_evidence: evidence, pending_response: null }
     connectorResult = brokered.result
     humanResponse = {}
   }

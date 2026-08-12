@@ -33,6 +33,18 @@ describe('ClarityMode Skill Contract v1', () => {
     ])
   })
 
+  test('normalizes manifest-defined work plans and structured progress', () => {
+    const workPlan = [
+      { id: 'research', label: 'Research the company', owner: 'claritymode' },
+      { id: 'review', label: 'Review the brief', owner: 'user' },
+    ]
+    expect(validateManifest({ ...manifest, workPlan }).workPlan).toEqual(workPlan)
+    expect(validateProviderResponse({
+      status: 'working',
+      progress: { label: 'Researching', currentStepId: 'research', completedStepIds: [] },
+    }).progress).toEqual({ label: 'Researching', currentStepId: 'research', completedStepIds: [] })
+  })
+
   test('rejects mismatched ids and unsupported field types', () => {
     expect(() => validateManifest(manifest, 'different-skill')).toThrow(/does not match/i)
     expect(() => validateManifest({ ...manifest, inputs: [{ id: 'file', type: 'password', label: 'Secret' }] })).toThrow(/unsupported/i)

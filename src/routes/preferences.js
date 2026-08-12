@@ -13,6 +13,7 @@ const ALLOWED_KEYS = new Set([
   'gmailRemoteImageSenders',
   'telegramPreferences',
   'pinnedProjects',
+  'projectViews',
 ])
 const APPEARANCE_THEMES = new Set(['soft', 'professional', 'editorial-grid', 'modernist-blocks'])
 
@@ -68,6 +69,30 @@ function normalizePinnedProjects(value) {
     if (!current || candidateTime > currentTime || (candidateTime === currentTime && candidate.deviceId >= current.deviceId)) {
       byPath.set(path, candidate)
     }
+  }
+  return { entries: [...byPath.values()].sort((a, b) => a.path.localeCompare(b.path)) }
+}
+
+function normalizeProjectViews(value) {
+  const entries = Array.isArray(value?.entries) ? value.entries : []
+  const byPath = new Map()
+  for (const entry of entries.slice(0, 500)) {
+    const path = normalizePinnedProjectPath(entry?.path)
+    if (!path) continue
+    const areaFilter = ['open', 'done', 'reference'].includes(entry?.areaFilter) ? entry.areaFilter : 'open'
+    const candidate = {
+      path,
+      areaFilter,
+      taskFilters: { open: entry?.taskFilters?.open !== false, done: Boolean(entry?.taskFilters?.done) },
+      collapsedKeys: [...new Set((Array.isArray(entry?.collapsedKeys) ? entry.collapsedKeys : [])
+        .slice(0, 300).map(key => String(key || '').trim().slice(0, 600)).filter(Boolean))],
+      changedAt: String(entry?.changedAt || '').slice(0, 40),
+      deviceId: String(entry?.deviceId || '').slice(0, 128),
+    }
+    const current = byPath.get(path)
+    const candidateTime = Date.parse(candidate.changedAt || '') || 0
+    const currentTime = Date.parse(current?.changedAt || '') || 0
+    if (!current || candidateTime > currentTime || (candidateTime === currentTime && candidate.deviceId >= current.deviceId)) byPath.set(path, candidate)
   }
   return { entries: [...byPath.values()].sort((a, b) => a.path.localeCompare(b.path)) }
 }
@@ -137,6 +162,7 @@ function normalizeChange(key, value) {
     }
   }
   if (key === 'pinnedProjects') return normalizePinnedProjects(value)
+  if (key === 'projectViews') return normalizeProjectViews(value)
   return undefined
 }
 
