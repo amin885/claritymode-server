@@ -348,6 +348,20 @@ $skill$,
           AND status = 'needs_approval'`,
     ],
   },
+  {
+    version: 14,
+    name: 'generic-skill-contract-v1',
+    statements: [
+      `ALTER TABLE v2_skills ADD COLUMN IF NOT EXISTS contract_version TEXT NOT NULL DEFAULT ''`,
+      `ALTER TABLE v2_skills ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT ''`,
+      `ALTER TABLE v2_skills ADD COLUMN IF NOT EXISTS provider_app_id TEXT NOT NULL DEFAULT ''`,
+      `ALTER TABLE v2_skills ADD COLUMN IF NOT EXISTS provider_version TEXT NOT NULL DEFAULT ''`,
+      `ALTER TABLE v2_skills ADD COLUMN IF NOT EXISTS manifest JSONB NOT NULL DEFAULT '{}'::jsonb`,
+      `CREATE INDEX IF NOT EXISTS v2_skills_provider_app
+        ON v2_skills (provider, provider_app_id)
+        WHERE status = 'active' AND provider_app_id <> ''`,
+    ],
+  },
 ]
 
 async function runMigrations(db) {

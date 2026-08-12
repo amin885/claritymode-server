@@ -1,6 +1,10 @@
 const db = require('./db')
 const credentials = require('./skillCredentials')
 const vidiq = require('./vidiqConnector')
+const crypto = require('crypto')
+const skillRunner = require('./skillRunner')
+const connectorBroker = require('./skillConnectorBroker')
+const { validateArtifacts, validateManifest } = require('./skillContract')
 
 const SKILL_ID = 'claritymode-youtube-script-producer'
 const VALID_RESULTS = new Set(['working', 'needs_connector', 'needs_approval', 'needs_input', 'ready_for_review', 'failed'])
@@ -101,6 +105,7 @@ function publicAssignment(row) {
     id: row.id,
     skillId: row.skill_id,
     skillVersion: row.skill_version,
+    contractVersion: String(row.contract_version || row.workflow_state?.contractVersion || ''),
     projectRef: row.project_ref,
     sourceTask: row.source_task,
     status: row.status,
@@ -129,7 +134,7 @@ function normalizeCreate(input = {}) {
   }
   if (!/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(normalized.id)) throw Object.assign(new Error('Invalid assignment identity.'), { status: 400 })
   if (!normalized.clientRequestId) throw Object.assign(new Error('A request identity is required.'), { status: 400 })
-  if (normalized.skillId !== SKILL_ID) throw Object.assign(new Error('That ClarityMode Skill is not available.'), { status: 400 })
+  if (!/^[a-z][a-z0-9_-]{1,99}$/i.test(normalized.skillId)) throw Object.assign(new Error('That ClarityMode Skill is not available.'), { status: 400 })
   if (!String(normalized.projectRef.path || '').trim()) throw Object.assign(new Error('A project is required.'), { status: 400 })
   if (!String(normalized.sourceTask.id || '').trim() || !String(normalized.sourceTask.text || '').trim()) {
     throw Object.assign(new Error('Choose a project task to hand to ClarityMode.'), { status: 400 })
@@ -736,7 +741,7 @@ async function persistResult(row, result, providerThreadId, connectorEvidence = 
             public_error = $10, internal_error = NULL, pending_response = NULL, provider_thread_id = $11,
             connector_evidence = $12,
             run_started_at = NULL, updated_at = now()
-      WHERE id = $1`,
+      WHERE id = $1 AND status <> 'cancelled'`,
     [
       row.id,
       status,
@@ -828,6 +833,9 @@ async function applyTopicPivotSelection(row, connectorEvidence, humanResponse) {
 }
 
 async function processAssignment(row, deps = {}) {
+  if (String(row.contract_version || '') === '1' && row.manifest && row.provider_app_id) {
+    return processContractAssignment(row, deps)
+  }
   let current = row
   let connectorEvidence = current.connector_evidence && typeof current.connector_evidence === 'object' ? current.connector_evidence : {}
   let connectorResults = connectorEvidence.vidiq?.results
@@ -955,15 +963,143 @@ async function processAssignment(row, deps = {}) {
   throw new Error('The Skill could not finish its connector work.')
 }
 
+function contractStateToken(row) {
+  return String(row.workflow_state?.stateToken || '')
+}
+
+async function invokeContractAgent(row, { humanResponse = {}, connectorResult = null } = {}, deps = {}) {
+  const operation = contractStateToken(row) ? 'resume' : 'start'
+  const envelope = {
+    operation,
+    contractVersion: '1',
+    assignment: { id: row.id, skillId: row.skill_id, skillVersion: row.skill_version },
+    context: {
+      project: row.project_ref || {},
+      projectArea: row.project_context?.projectArea || {},
+      sourceTask: row.source_task || {},
+      projectContext: row.project_context || {},
+      userProfile: row.skill_profile || {},
+      userInputs: row.brief || {},
+    },
+    stateToken: contractStateToken(row),
+    response: humanResponse || {},
+    connectorResult: connectorResult || {},
+  }
+  const requestFingerprint = crypto.createHash('sha256').update(JSON.stringify({
+    operation,
+    stateToken: envelope.stateToken,
+    response: envelope.response,
+    connectorResult: envelope.connectorResult,
+  })).digest('hex').slice(0, 24)
+  return skillRunner.invoke({
+    provider: row.provider,
+    appId: row.provider_app_id,
+    version: row.provider_version || '',
+    envelope,
+    idempotencyKey: `${row.id}:${requestFingerprint}`,
+  }, deps)
+}
+
+async function persistContractResult(row, result, providerThreadId, connectorEvidence = row.connector_evidence || {}) {
+  const manifest = validateManifest(row.manifest, row.skill_id)
+  let status = result.status
+  const artifacts = validateArtifacts(manifest, result.artifacts, {
+    requireOutputs: status === 'ready_for_review' || status === 'completed',
+  })
+  if (status === 'completed') status = manifest.completion.requiresAcceptance || result.artifacts.length ? 'ready_for_review' : 'accepted'
+  const question = result.inputRequest
+    ? { id: result.inputRequest.id, kind: result.inputRequest.type, prompt: result.inputRequest.label, field: result.inputRequest }
+    : null
+  const approval = result.review
+    ? { kind: 'generic_review', title: result.review.title, message: result.review.message, allowRequestChanges: result.review.allowRequestChanges }
+    : null
+  await db.query(
+    `UPDATE skill_assignments
+        SET status = $2, stage = $3, progress_label = $4,
+            workflow_state = $5, connector_request = $6, approval = $7, question = $8,
+            artifacts = $9, public_error = $10, internal_error = NULL,
+            pending_response = NULL, provider_thread_id = $11, connector_evidence = $12,
+            run_started_at = NULL, accepted_at = CASE WHEN $2 = 'accepted' THEN now() ELSE accepted_at END,
+            updated_at = now()
+      WHERE id = $1 AND status <> 'cancelled'`,
+    [
+      row.id,
+      status === 'working' ? 'queued' : status,
+      result.status,
+      result.progress.label,
+      { contractVersion: '1', stateToken: result.stateToken || '' },
+      result.connectorRequest,
+      approval,
+      question,
+      JSON.stringify(artifacts),
+      result.error,
+      providerThreadId,
+      connectorEvidence,
+    ],
+  )
+}
+
+async function processContractAssignment(row, deps = {}) {
+  const manifest = validateManifest(row.manifest, row.skill_id)
+  let current = row
+  let humanResponse = current.pending_response || {}
+  let connectorResult = null
+  let evidence = current.connector_evidence && typeof current.connector_evidence === 'object' ? current.connector_evidence : {}
+  for (let pass = 0; pass < 8; pass += 1) {
+    const invocation = await invokeContractAgent(current, { humanResponse, connectorResult }, deps)
+    const result = invocation.result
+    if (result.status !== 'needs_connector') {
+      await persistContractResult(current, result, invocation.threadId, evidence)
+      return
+    }
+    const request = result.connectorRequest
+    const cached = evidence.contractRequests?.[request.id]
+    let brokered = cached ? { needsConnection: false, result: cached } : await connectorBroker.execute({ userId: current.user_id, manifest, request }, { ...deps, db })
+    if (brokered.needsConnection) {
+      await persistContractResult(current, {
+        ...result,
+        status: 'needs_input',
+        inputRequest: {
+          id: `connect_${brokered.connector}`,
+          type: 'text',
+          label: `Connect ${brokered.connector} in ClarityMode Skills settings, then retry.`,
+          required: false,
+        },
+        connectorRequest: null,
+      }, invocation.threadId, evidence)
+      return
+    }
+    evidence = {
+      ...evidence,
+      contractRequests: { ...(evidence.contractRequests || {}), [request.id]: brokered.result },
+    }
+    await db.query(
+      `UPDATE skill_assignments
+          SET workflow_state = $2, connector_evidence = $3, provider_thread_id = $4,
+              progress_label = 'Connected research received; continuing...', updated_at = now()
+        WHERE id = $1`,
+      [current.id, { contractVersion: '1', stateToken: result.stateToken || '' }, evidence, invocation.threadId],
+    )
+    current = { ...current, workflow_state: { contractVersion: '1', stateToken: result.stateToken || '' }, connector_evidence: evidence, pending_response: null }
+    connectorResult = brokered.result
+    humanResponse = {}
+  }
+  throw new Error('The Skill requested too many connector steps in one run.')
+}
+
 async function claimNext() {
   const client = await db.connect()
   try {
     await client.query('BEGIN')
     const result = await client.query(
-      `SELECT * FROM skill_assignments
-        WHERE status = 'queued'
-           OR (status = 'working' AND run_started_at < now() - interval '10 minutes')
-        ORDER BY updated_at ASC
+      `SELECT a.*, s.contract_version, s.provider, s.provider_app_id, s.provider_version, s.manifest,
+              COALESCE(p.profile, '{}'::jsonb) AS skill_profile
+         FROM skill_assignments a
+         JOIN v2_skills s ON s.id = a.skill_id
+         LEFT JOIN skill_user_profiles p ON p.user_id = a.user_id AND p.skill_id = a.skill_id
+        WHERE a.status = 'queued'
+           OR (a.status = 'working' AND a.run_started_at < now() - interval '10 minutes')
+        ORDER BY a.updated_at ASC
         LIMIT 1
         FOR UPDATE SKIP LOCKED`,
     )
@@ -1056,11 +1192,14 @@ module.exports = {
   hasOutlierEvidence,
   hiddenDirectionResponse,
   invokeAgent,
+  invokeContractAgent,
   invokeTopicResearchWorker,
   normalizeCreate,
   parseAgentResult,
+  persistContractResult,
   persistResult,
   publicAssignment,
+  processContractAssignment,
   generateTopicCandidates,
   normalizedTopicWorkerOptions,
   needsRevisionEvidenceRecovery,

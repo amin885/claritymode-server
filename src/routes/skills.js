@@ -1,7 +1,9 @@
 const express = require('express')
 const db = require('../db')
 const requireAuth = require('../middleware/requireAuth')
-const { getSkillCatalog, installSkill, previewSkill, skillsForEnabledIds } = require('../skills')
+const { getSkillCatalog, installSkill, previewSkill, publicSkill, skillsForEnabledIds } = require('../skills')
+const skillRunner = require('../skillRunner')
+const connectorBroker = require('../skillConnectorBroker')
 
 const router = express.Router()
 
@@ -12,7 +14,7 @@ router.get('/v2/skills/available', requireAuth, async (req, res) => {
       [req.user.email.toLowerCase().trim()]
     )
     const enabledIds = result.rows[0]?.enabled_v2_skills || []
-    res.json({ skills: await skillsForEnabledIds(enabledIds) })
+    res.json({ skills: (await skillsForEnabledIds(enabledIds)).map(publicSkill) })
   } catch {
     res.status(500).json({ error: 'Failed to fetch skills' })
   }
@@ -25,7 +27,7 @@ router.get('/skills/available', requireAuth, async (req, res) => {
       [req.user.email.toLowerCase().trim()]
     )
     const enabledIds = result.rows[0]?.enabled_v2_skills || []
-    res.json({ skills: await skillsForEnabledIds(enabledIds) })
+    res.json({ skills: (await skillsForEnabledIds(enabledIds)).map(publicSkill) })
   } catch {
     res.status(500).json({ error: 'Failed to fetch skills' })
   }
@@ -51,6 +53,34 @@ router.post('/auth/admin/v2/skills/preview', async (req, res) => {
     res.json({ skill: await previewSkill(req.body || {}) })
   } catch (err) {
     res.status(err.status || 500).json({ error: err.status ? err.message : 'Failed to preview skill' })
+  }
+})
+
+router.post('/auth/admin/v2/skills/describe', async (req, res) => {
+  if (!requireAdmin(req, res)) return
+  try {
+    const provider = String(req.body?.provider || 'mindstudio').trim().toLowerCase()
+    const providerAppId = String(req.body?.providerAppId || '').trim()
+    const providerVersion = String(req.body?.providerVersion || '').trim()
+    const manifest = await skillRunner.describeSkill({ provider, appId: providerAppId, version: providerVersion })
+    const unsupportedConnector = manifest.connectors.find(connector => !connectorBroker.supportsDeclaration(connector))
+    if (unsupportedConnector) throw Object.assign(new Error(`Connector ${unsupportedConnector.connector} is not supported by ClarityMode yet.`), { status: 400 })
+    res.json({
+      skill: {
+        id: manifest.skillId,
+        name: manifest.name,
+        description: manifest.description,
+        version: manifest.skillVersion,
+        contractVersion: manifest.contractVersion,
+        provider,
+        providerAppId,
+        providerVersion,
+        manifest,
+        summary: manifest.description,
+      },
+    })
+  } catch (error) {
+    res.status(Number(error.status) || 500).json({ error: Number(error.status) ? error.message : 'That Skill workflow could not be read.' })
   }
 })
 

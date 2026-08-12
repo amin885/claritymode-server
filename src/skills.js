@@ -1,5 +1,9 @@
 const db = require('./db')
 const anthropic = require('./anthropic')
+const { validateManifest } = require('./skillContract')
+const { supportsDeclaration } = require('./skillConnectorBroker')
+
+const EXECUTION_PROVIDERS = new Set(['mindstudio', 'mastra'])
 
 const DEFAULT_SKILL_CATALOG = []
 const MAX_SKILL_BYTES = 256 * 1024
@@ -7,7 +11,9 @@ const MAX_SKILL_BYTES = 256 * 1024
 async function getSkillCatalog() {
   try {
     const result = await db.query(`
-      SELECT id, name, description, version, source_url, data_source, content, summary, status, created_at, updated_at
+      SELECT id, name, description, version, source_url, data_source, content, summary, status,
+             contract_version, provider, provider_app_id, provider_version, manifest,
+             created_at, updated_at
       FROM v2_skills
       WHERE status = 'active'
       ORDER BY name ASC
@@ -40,14 +46,25 @@ function normalizeCatalog(skills) {
       content: String(skill.content || '').trim(),
       summary: String(skill.summary || '').trim(),
       status: String(skill.status || 'active').trim(),
+      contractVersion: String(skill.contractVersion || skill.contract_version || '').trim(),
+      provider: String(skill.provider || '').trim(),
+      providerAppId: String(skill.providerAppId || skill.provider_app_id || '').trim(),
+      providerVersion: String(skill.providerVersion || skill.provider_version || '').trim(),
+      manifest: skill.manifest && typeof skill.manifest === 'object' && !Array.isArray(skill.manifest) ? skill.manifest : null,
     }))
-    .filter(skill => skill.id && skill.content && skill.status !== 'archived')
+    .filter(skill => skill.id && (skill.content || skill.manifest) && skill.status !== 'archived')
 }
 
 async function skillsForEnabledIds(enabledIds) {
   const allowed = new Set((Array.isArray(enabledIds) ? enabledIds : []).map(id => String(id).trim()).filter(Boolean))
   const catalog = await getSkillCatalog()
   return catalog.filter(skill => allowed.has(skill.id))
+}
+
+function publicSkill(skill) {
+  if (!skill || typeof skill !== 'object') return skill
+  const { provider, providerAppId, providerVersion, ...visible } = skill
+  return visible
 }
 
 async function fetchSkillMarkdown(sourceUrl) {
@@ -94,18 +111,40 @@ async function installSkill(input = {}) {
     dataSource: String(input.dataSource || input.data_source || '').trim(),
     content: String(input.content || '').trim(),
     summary: String(input.summary || '').trim(),
+    contractVersion: String(input.contractVersion || input.contract_version || '').trim(),
+    provider: String(input.provider || '').trim(),
+    providerAppId: String(input.providerAppId || input.provider_app_id || '').trim(),
+    providerVersion: String(input.providerVersion || input.provider_version || '').trim(),
+    manifest: input.manifest && typeof input.manifest === 'object' && !Array.isArray(input.manifest) ? input.manifest : null,
   }
-  const parsed = parseSkillMarkdown(preview.content, preview.sourceUrl)
+  const parsed = preview.content
+    ? parseSkillMarkdown(preview.content, preview.sourceUrl)
+    : { id: String(preview.manifest?.skillId || '').trim(), name: String(preview.manifest?.name || '').trim(), description: String(preview.manifest?.description || '').trim(), version: String(preview.manifest?.skillVersion || '').trim(), sourceUrl: '', content: '' }
   const skill = {
     ...parsed,
     ...Object.fromEntries(Object.entries(preview).filter(([, value]) => value)),
     status: 'active',
   }
   if (!skill.summary) skill.summary = await summarizeSkill(skill)
+  if (skill.manifest) {
+    skill.manifest = validateManifest(skill.manifest, skill.id)
+    const unsupportedConnector = skill.manifest.connectors.find(connector => !supportsDeclaration(connector))
+    if (unsupportedConnector) throw Object.assign(new Error(`Connector ${unsupportedConnector.connector} requests operations ClarityMode does not support yet.`), { status: 400 })
+    skill.contractVersion = skill.manifest.contractVersion
+    skill.version = skill.manifest.skillVersion
+    skill.name = skill.manifest.name
+    skill.description = skill.manifest.description
+    if (!skill.providerAppId) throw Object.assign(new Error('A runner workflow ID is required for an executable Skill.'), { status: 400 })
+    skill.provider = String(skill.provider || '').trim().toLowerCase()
+    if (!EXECUTION_PROVIDERS.has(skill.provider)) throw Object.assign(new Error('Choose a supported Skill runner.'), { status: 400 })
+  }
 
   const result = await db.query(
-    `INSERT INTO v2_skills (id, name, description, version, source_url, data_source, content, summary, status, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active', now())
+    `INSERT INTO v2_skills (
+       id, name, description, version, source_url, data_source, content, summary, status,
+       contract_version, provider, provider_app_id, provider_version, manifest, updated_at
+     )
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active', $9, $10, $11, $12, $13, now())
      ON CONFLICT (id) DO UPDATE SET
        name = EXCLUDED.name,
        description = EXCLUDED.description,
@@ -114,10 +153,17 @@ async function installSkill(input = {}) {
        data_source = EXCLUDED.data_source,
        content = EXCLUDED.content,
        summary = EXCLUDED.summary,
+       contract_version = EXCLUDED.contract_version,
+       provider = EXCLUDED.provider,
+       provider_app_id = EXCLUDED.provider_app_id,
+       provider_version = EXCLUDED.provider_version,
+       manifest = EXCLUDED.manifest,
        status = 'active',
        updated_at = now()
-     RETURNING id, name, description, version, source_url, data_source, content, summary, status, created_at, updated_at`,
-    [skill.id, skill.name, skill.description, skill.version, skill.sourceUrl, String(skill.dataSource || '').trim(), skill.content, skill.summary],
+     RETURNING id, name, description, version, source_url, data_source, content, summary, status,
+               contract_version, provider, provider_app_id, provider_version, manifest,
+               created_at, updated_at`,
+    [skill.id, skill.name, skill.description, skill.version, skill.sourceUrl, String(skill.dataSource || '').trim(), skill.content, skill.summary, skill.contractVersion || '', skill.provider || '', skill.providerAppId || '', skill.providerVersion || '', skill.manifest || {}],
   )
   return normalizeCatalog(result.rows)[0]
 }
@@ -192,9 +238,11 @@ function slugify(value) {
 }
 
 module.exports = {
+  EXECUTION_PROVIDERS,
   getSkillCatalog,
   installSkill,
   parseSkillMarkdown,
   previewSkill,
+  publicSkill,
   skillsForEnabledIds,
 }

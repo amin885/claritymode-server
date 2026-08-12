@@ -13,7 +13,9 @@ process.env.CLARITYMODE_SKILL_CATALOG = JSON.stringify({
 })
 jest.mock('../src/db')
 jest.mock('../src/anthropic')
+jest.mock('../src/skillProvider')
 const db = require('../src/db')
+const skillProvider = require('../src/skillProvider')
 const request = require('supertest')
 const app = require('../server')
 const bcrypt = require('bcryptjs')
@@ -363,6 +365,32 @@ describe('V2 owner-installed skills', () => {
   beforeEach(() => {
     process.env.ADMIN_SECRET = 'test-secret'
     global.fetch = undefined
+  })
+
+  it('reads a contract manifest from a MindStudio Agent ID without exposing provider credentials', async () => {
+    skillProvider.describeSkill.mockResolvedValueOnce({
+      contractVersion: '1',
+      skillId: 'company-research',
+      skillVersion: '1.0.0',
+      name: 'Company Research',
+      description: 'Prepare a company brief.',
+      inputs: [{ id: 'company', type: 'text', label: 'Company', required: true }],
+      outputs: [{ id: 'brief', type: 'markdown', label: 'Brief', required: true }],
+      connectors: [],
+      completion: { requiresAcceptance: true, completeSourceTaskOnAcceptance: false, completeWorkAreaOnAcceptance: false },
+    })
+    const res = await request(app)
+      .post('/auth/admin/v2/skills/describe')
+      .set('x-admin-secret', 'test-secret')
+      .send({ providerAppId: 'mindstudio-agent-123', providerVersion: 'published' })
+    expect(res.status).toBe(200)
+    expect(res.body.skill).toMatchObject({
+      id: 'company-research',
+      provider: 'mindstudio',
+      providerAppId: 'mindstudio-agent-123',
+      contractVersion: '1',
+    })
+    expect(res.body.skill).not.toHaveProperty('apiKey')
   })
 
   it('previews pasted SKILL.md content with a Maude summary', async () => {
