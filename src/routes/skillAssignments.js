@@ -278,26 +278,40 @@ router.post('/:id/respond', async (req, res) => {
 router.post('/:id/accept', async (req, res) => {
   const result = await db.query(
     `UPDATE skill_assignments
-        SET status = 'accepted', stage = 'accepted', progress_label = 'Accepted', accepted_at = now(), updated_at = now()
+        SET status = 'queued', stage = 'accepting', progress_label = 'Finishing this assignment...',
+            pending_response = jsonb_build_object('kind', 'accept'), updated_at = now()
       WHERE id = $1 AND user_id = $2 AND status = 'ready_for_review'
       RETURNING *`,
     [req.params.id, req.user.sub],
   )
   if (!result.rows[0]) return res.status(409).json({ error: 'This assignment is not ready to accept.' })
-  res.json({ ok: true, assignment: assignments.publicAssignment(result.rows[0]) })
+  assignments.workOnce().catch(() => {})
+  res.status(202).json({ ok: true, assignment: assignments.publicAssignment(result.rows[0]) })
 })
 
 router.post('/:id/cancel', async (req, res) => {
-  const result = await db.query(
+  const immediate = await db.query(
     `UPDATE skill_assignments
         SET status = 'cancelled', stage = 'cancelled', progress_label = 'Cancelled',
             pending_response = NULL, run_started_at = NULL, updated_at = now()
       WHERE id = $1 AND user_id = $2 AND status NOT IN ('accepted', 'cancelled')
+        AND COALESCE(workflow_state->>'stateToken', '') = ''
       RETURNING *`,
     [req.params.id, req.user.sub],
   )
-  if (!result.rows[0]) return res.status(409).json({ error: 'This assignment cannot be cancelled.' })
-  res.json({ ok: true, assignment: assignments.publicAssignment(result.rows[0]) })
+  if (immediate.rows[0]) return res.json({ ok: true, assignment: assignments.publicAssignment(immediate.rows[0]) })
+  const queued = await db.query(
+    `UPDATE skill_assignments
+        SET status = 'queued', stage = 'cancelling', progress_label = 'Cancelling this assignment...',
+            pending_response = jsonb_build_object('kind', 'cancel'), updated_at = now()
+      WHERE id = $1 AND user_id = $2 AND status NOT IN ('accepted', 'cancelled')
+        AND COALESCE(workflow_state->>'stateToken', '') <> ''
+      RETURNING *`,
+    [req.params.id, req.user.sub],
+  )
+  if (!queued.rows[0]) return res.status(409).json({ error: 'This assignment cannot be cancelled.' })
+  assignments.workOnce().catch(() => {})
+  res.status(202).json({ ok: true, assignment: assignments.publicAssignment(queued.rows[0]) })
 })
 
 module.exports = router

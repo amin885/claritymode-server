@@ -62,6 +62,17 @@ describe('generic durable Skill assignments', () => {
     expect(envelope.context.userInputs).toEqual({ companyName: 'Acme' })
   })
 
+  test('cancels the durable runner workflow when ClarityMode cancels an active assignment', async () => {
+    const invoke = jest.spyOn(skillRunner, 'invoke').mockResolvedValue({
+      result: { contractVersion: '1', status: 'cancelled', stateToken: 'state-1', artifacts: [] },
+      threadId: 'thread-1',
+    })
+    await assignments.invokeContractAgent(row({
+      workflow_state: { contractVersion: '1', stateToken: 'state-1' },
+    }), { humanResponse: { kind: 'cancel' } })
+    expect(invoke.mock.calls[0][0].envelope.operation).toBe('cancel')
+  })
+
   test('persists a provider input request without Skill-specific parsing', async () => {
     const query = jest.spyOn(db, 'query').mockResolvedValue({ rows: [] })
     await assignments.persistContractResult(row(), {
@@ -91,6 +102,16 @@ describe('generic durable Skill assignments', () => {
       artifacts: [{ id: 'brief', title: 'Acme brief', type: 'markdown', content: '# Acme' }], error: null,
     }, 'thread-1')
     expect(query.mock.calls[0][1][1]).toBe('ready_for_review')
+  })
+
+  test('finishes the durable runner workflow when the reviewed result is accepted', async () => {
+    const query = jest.spyOn(db, 'query').mockResolvedValue({ rows: [] })
+    await assignments.persistContractResult(row({ pending_response: { kind: 'accept' } }), {
+      contractVersion: '1', status: 'completed', stateToken: 'done', progress: { label: 'Complete' },
+      inputRequest: null, connectorRequest: null, review: null,
+      artifacts: [{ id: 'brief', title: 'Acme brief', type: 'markdown', content: '# Acme' }], error: null,
+    }, 'thread-1')
+    expect(query.mock.calls[0][1][1]).toBe('accepted')
   })
 
   test('claims only the assignment row when optional profile data is left joined', async () => {

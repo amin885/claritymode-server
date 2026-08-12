@@ -92,7 +92,7 @@ function stateToken(row) {
 }
 
 async function invokeContractAgent(row, { humanResponse = {}, connectorResult = null } = {}, deps = {}) {
-  const operation = stateToken(row) ? 'resume' : 'start'
+  const operation = humanResponse?.kind === 'cancel' ? 'cancel' : stateToken(row) ? 'resume' : 'start'
   const envelope = {
     operation,
     contractVersion: '1',
@@ -127,7 +127,11 @@ async function persistContractResult(row, result, providerThreadId, connectorEvi
   const artifacts = validateArtifacts(manifest, result.artifacts, {
     requireOutputs: status === 'ready_for_review' || status === 'completed',
   })
-  if (status === 'completed') status = manifest.completion.requiresAcceptance || artifacts.length ? 'ready_for_review' : 'accepted'
+  if (status === 'completed') {
+    status = row.pending_response?.kind === 'accept'
+      ? 'accepted'
+      : manifest.completion.requiresAcceptance || artifacts.length ? 'ready_for_review' : 'accepted'
+  }
   if (!PUBLIC_STATUSES.has(status) && status !== 'needs_connector') throw new Error(`The Skill returned unsupported status ${status}.`)
   const question = result.inputRequest
     ? { id: result.inputRequest.id, kind: result.inputRequest.type, prompt: result.inputRequest.label, field: result.inputRequest }
