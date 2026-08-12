@@ -2,6 +2,25 @@ const assignments = require('../src/skillAssignments')
 const db = require('../src/db')
 
 describe('durable ClarityMode Skill assignments', () => {
+  test('the generic worker does not depend on legacy MindStudio configuration', () => {
+    const originalCredentialKey = process.env.CLARITYMODE_CREDENTIAL_KEY
+    const originalMindStudioKey = process.env.MINDSTUDIO_API_KEY
+    const originalAgentId = process.env.MINDSTUDIO_YOUTUBE_PRODUCER_AGENT_ID
+    process.env.CLARITYMODE_CREDENTIAL_KEY = 'test-credential-key'
+    delete process.env.MINDSTUDIO_API_KEY
+    delete process.env.MINDSTUDIO_YOUTUBE_PRODUCER_AGENT_ID
+    try {
+      expect(assignments.configured()).toBe(true)
+    } finally {
+      if (originalCredentialKey === undefined) delete process.env.CLARITYMODE_CREDENTIAL_KEY
+      else process.env.CLARITYMODE_CREDENTIAL_KEY = originalCredentialKey
+      if (originalMindStudioKey === undefined) delete process.env.MINDSTUDIO_API_KEY
+      else process.env.MINDSTUDIO_API_KEY = originalMindStudioKey
+      if (originalAgentId === undefined) delete process.env.MINDSTUDIO_YOUTUBE_PRODUCER_AGENT_ID
+      else process.env.MINDSTUDIO_YOUTUBE_PRODUCER_AGENT_ID = originalAgentId
+    }
+  })
+
   test('routes only explicitly listed users to the test workflow', () => {
     const original = {
       agentId: process.env.MINDSTUDIO_YOUTUBE_PRODUCER_AGENT_ID,

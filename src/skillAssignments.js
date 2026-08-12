@@ -18,11 +18,10 @@ let running = false
 const MAX_TRANSIENT_ATTEMPTS = 3
 
 function configured() {
-  return Boolean(
-    credentials.configured()
-    && String(process.env.MINDSTUDIO_API_KEY || '').trim()
-    && String(process.env.MINDSTUDIO_YOUTUBE_PRODUCER_AGENT_ID || '').trim()
-  )
+  // The queue is provider-neutral. Provider readiness is checked for the
+  // assignment being executed, so removing one legacy provider must not stop
+  // unrelated Mastra (or future provider) assignments from being claimed.
+  return credentials.configured()
 }
 
 function commaSeparatedSet(value) {
