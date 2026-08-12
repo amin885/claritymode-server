@@ -425,6 +425,60 @@ $skill$,
         WHERE provider = 'mastra' AND provider_app_id = 'company-research'`,
     ],
   },
+  {
+    version: 17,
+    name: 'meeting-summary-mastra-skill',
+    statements: [
+      `INSERT INTO v2_skills (
+         id, name, description, version, source_url, data_source, content, summary, status,
+         contract_version, provider, provider_app_id, provider_version, manifest, updated_at
+       ) VALUES (
+         'meeting-summary',
+         'Meeting Summary',
+         'Turn a meeting transcript into a clear summary, decisions, follow-ups, and open questions.',
+         '1.0.0', '', 'mastra',
+         '# Meeting Summary\n\nA reusable ClarityMode Skill that turns a pasted meeting transcript into a grounded, reviewable summary. The existing Meeting Notes feature remains unchanged.',
+         'Prepare a grounded meeting summary with decisions, follow-ups, and open questions.',
+         'active', '1', 'mastra', 'meeting-summary', '1.0.0',
+         '${JSON.stringify({
+           contractVersion: '1',
+           skillId: 'meeting-summary',
+           skillVersion: '1.0.0',
+           name: 'Meeting Summary',
+           description: 'Turn a meeting transcript into a clear summary, decisions, follow-ups, and open questions.',
+           inputs: [
+             { id: 'meetingTitle', type: 'text', label: 'Meeting title', required: true, description: 'A short name for the meeting.' },
+             { id: 'transcript', type: 'long_text', label: 'Meeting transcript', required: true, description: 'Paste the complete transcript. ClarityMode will not invent details that are not present.' },
+             { id: 'focus', type: 'long_text', label: 'Anything to emphasize?', required: false, description: 'Optional priorities, decisions, or follow-ups to pay special attention to.' },
+           ],
+           outputs: [{ id: 'summary', type: 'markdown', label: 'Meeting summary', required: true }],
+           connectors: [],
+           workPlan: [
+             { id: 'review-transcript', label: 'Review the transcript', owner: 'claritymode' },
+             { id: 'extract-outcomes', label: 'Extract decisions, follow-ups, and open questions', owner: 'claritymode' },
+             { id: 'prepare-summary', label: 'Prepare the meeting summary', owner: 'claritymode' },
+             { id: 'review-summary', label: 'Review and accept the meeting summary', owner: 'user' },
+           ],
+           completion: { requiresAcceptance: true, completeSourceTaskOnAcceptance: false, completeWorkAreaOnAcceptance: false },
+         }).replace(/'/g, "''")}'::jsonb,
+         now()
+       )
+       ON CONFLICT (id) DO UPDATE SET
+         name = EXCLUDED.name,
+         description = EXCLUDED.description,
+         version = EXCLUDED.version,
+         data_source = EXCLUDED.data_source,
+         content = EXCLUDED.content,
+         summary = EXCLUDED.summary,
+         status = 'active',
+         contract_version = EXCLUDED.contract_version,
+         provider = EXCLUDED.provider,
+         provider_app_id = EXCLUDED.provider_app_id,
+         provider_version = EXCLUDED.provider_version,
+         manifest = EXCLUDED.manifest,
+         updated_at = now()` ,
+    ],
+  },
 ]
 
 async function runMigrations(db) {

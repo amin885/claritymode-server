@@ -145,7 +145,7 @@ function validateAssignmentInputs(manifest, inputs) {
       if (!Number.isFinite(number)) throw contractError(`${field.label} must be a number.`)
       result[field.id] = number
     } else {
-      const string = text(value, field.type === 'long_text' ? 50_000 : 5_000)
+      const string = text(value, field.type === 'long_text' ? 200_000 : 5_000)
       if (field.type === 'select' && !field.options.some(option => option.value === string)) throw contractError(`Choose a valid option for ${field.label}.`)
       result[field.id] = string
     }

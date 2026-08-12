@@ -1,4 +1,4 @@
-const { connectorAllowed, validateArtifacts, validateManifest, validateProviderResponse } = require('../src/skillContract')
+const { connectorAllowed, validateArtifacts, validateAssignmentInputs, validateManifest, validateProviderResponse } = require('../src/skillContract')
 const { publicSkill } = require('../src/skills')
 
 const manifest = {
@@ -99,5 +99,14 @@ describe('ClarityMode Skill Contract v1', () => {
       providerVersion: 'published',
       manifest,
     })).toEqual({ id: 'company-research', manifest })
+  })
+
+  test('preserves long transcript inputs within the assignment payload limit', () => {
+    const transcriptManifest = {
+      ...manifest,
+      inputs: [{ id: 'transcript', type: 'long_text', label: 'Meeting transcript', required: true }],
+    }
+    const transcript = `Start. ${'Discussion. '.repeat(10_000)} End.`
+    expect(validateAssignmentInputs(transcriptManifest, { transcript }).transcript).toMatch(/End\.$/)
   })
 })

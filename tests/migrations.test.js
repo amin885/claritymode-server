@@ -2,7 +2,7 @@ const { migrations, runMigrations } = require('../src/migrations')
 
 describe('numbered database migrations', () => {
   test('contains a durable collaboration migration after the legacy schema', () => {
-    expect(migrations.map(item => item.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
+    expect(migrations.map(item => item.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17])
     expect(migrations[1].statements.join('\n')).toContain('shared_project_operations')
     expect(migrations[1].statements.join('\n')).toContain('shared_project_conflicts')
     expect(migrations[2].statements.join('\n')).toContain('shared_project_events')
@@ -20,6 +20,10 @@ describe('numbered database migrations', () => {
     expect(migrations[14].statements.join('\n')).toContain("provider = 'mastra'")
     expect(migrations[14].statements.join('\n')).toContain('claritymode-youtube-outline-mastra-test')
     expect(migrations[14].statements.join('\n')).not.toContain('$manifest$')
+    expect(migrations[15].statements.join('\n')).toContain('workPlan')
+    expect(migrations[16].statements.join('\n')).toContain("'meeting-summary'")
+    expect(migrations[16].statements.join('\n')).toContain('Review the transcript')
+    expect(migrations[16].statements.join('\n')).toContain('completeWorkAreaOnAcceptance')
     expect(migrations[10].statements.join('\n')).toContain('internal_error')
   })
 
