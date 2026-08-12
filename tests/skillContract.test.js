@@ -82,7 +82,7 @@ describe('ClarityMode Skill Contract v1', () => {
   test('keeps provider routing private in user-facing Skill metadata', () => {
     expect(publicSkill({
       id: 'company-research',
-      provider: 'mindstudio',
+      provider: 'mastra',
       providerAppId: 'private-agent-id',
       providerVersion: 'published',
       manifest,

@@ -362,6 +362,46 @@ $skill$,
         WHERE status = 'active' AND provider_app_id <> ''`,
     ],
   },
+  {
+    version: 15,
+    name: 'promote-mastra-skill-framework',
+    statements: [
+      `UPDATE v2_skills
+          SET name = 'YouTube Outline Builder',
+              description = 'Turn a seed idea and your point of view into an outlier-informed YouTube outline.',
+              version = '1.0.0',
+              contract_version = '1',
+              provider = 'mastra',
+              provider_app_id = 'claritymode-youtube-script-producer',
+              provider_version = '1.0.0',
+              manifest = $manifest${JSON.stringify({
+                contractVersion: '1',
+                skillId: 'claritymode-youtube-script-producer',
+                skillVersion: '1.0.0',
+                name: 'YouTube Outline Builder',
+                description: 'Turn a seed idea and your point of view into an outlier-informed YouTube outline.',
+                inputs: [
+                  { id: 'seedIdea', type: 'text', label: 'Video idea', required: true, description: 'The main idea or working title.' },
+                  { id: 'brainDump', type: 'long_text', label: 'What is already in your head?', required: false, description: 'Opinions, experience, stories, examples, or lessons.' },
+                  { id: 'callToAction', type: 'long_text', label: 'Call to action', required: true, description: 'What should the viewer do next?' },
+                ],
+                outputs: [{ id: 'outline', type: 'markdown', label: 'YouTube outline', required: true }],
+                connectors: [{ connector: 'vidiq', operations: ['research_topics'] }],
+                completion: { requiresAcceptance: true, completeSourceTaskOnAcceptance: false, completeWorkAreaOnAcceptance: false },
+              })}$manifest$::jsonb,
+              content = '# YouTube Outline Builder\n\nA reusable ClarityMode Skill executed by the managed Mastra runner. ClarityMode owns tasks, project context, user approvals, deliverables, and the user-owned VidIQ connection.',
+              summary = 'A reusable project workflow for VidIQ opportunity research and a reviewable YouTube outline.',
+              status = 'active',
+              updated_at = now()
+        WHERE id = 'claritymode-youtube-script-producer'`,
+      `UPDATE v2_skills
+          SET status = 'archived', updated_at = now()
+        WHERE id = 'claritymode-youtube-outline-mastra-test'`,
+      `UPDATE users
+          SET enabled_v2_skills = array_remove(enabled_v2_skills, 'claritymode-youtube-outline-mastra-test')
+        WHERE 'claritymode-youtube-outline-mastra-test' = ANY(enabled_v2_skills)`,
+    ],
+  },
 ]
 
 async function runMigrations(db) {

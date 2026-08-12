@@ -13,9 +13,9 @@ process.env.CLARITYMODE_SKILL_CATALOG = JSON.stringify({
 })
 jest.mock('../src/db')
 jest.mock('../src/anthropic')
-jest.mock('../src/skillProvider')
+jest.mock('../src/mastraSkillProvider')
 const db = require('../src/db')
-const skillProvider = require('../src/skillProvider')
+const skillProvider = require('../src/mastraSkillProvider')
 const request = require('supertest')
 const app = require('../server')
 const bcrypt = require('bcryptjs')
@@ -367,7 +367,7 @@ describe('V2 owner-installed skills', () => {
     global.fetch = undefined
   })
 
-  it('reads a contract manifest from a MindStudio Agent ID without exposing provider credentials', async () => {
+  it('reads a contract manifest from the managed Skill runner without exposing provider credentials', async () => {
     skillProvider.describeSkill.mockResolvedValueOnce({
       contractVersion: '1',
       skillId: 'company-research',
@@ -382,12 +382,12 @@ describe('V2 owner-installed skills', () => {
     const res = await request(app)
       .post('/auth/admin/v2/skills/describe')
       .set('x-admin-secret', 'test-secret')
-      .send({ providerAppId: 'mindstudio-agent-123', providerVersion: 'published' })
+      .send({ providerAppId: 'company-research', providerVersion: '1.0.0' })
     expect(res.status).toBe(200)
     expect(res.body.skill).toMatchObject({
       id: 'company-research',
-      provider: 'mindstudio',
-      providerAppId: 'mindstudio-agent-123',
+      provider: 'mastra',
+      providerAppId: 'company-research',
       contractVersion: '1',
     })
     expect(res.body.skill).not.toHaveProperty('apiKey')

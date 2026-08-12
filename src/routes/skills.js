@@ -59,7 +59,7 @@ router.post('/auth/admin/v2/skills/preview', async (req, res) => {
 router.post('/auth/admin/v2/skills/describe', async (req, res) => {
   if (!requireAdmin(req, res)) return
   try {
-    const provider = String(req.body?.provider || 'mindstudio').trim().toLowerCase()
+    const provider = 'mastra'
     const providerAppId = String(req.body?.providerAppId || '').trim()
     const providerVersion = String(req.body?.providerVersion || '').trim()
     const manifest = await skillRunner.describeSkill({ provider, appId: providerAppId, version: providerVersion })

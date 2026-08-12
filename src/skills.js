@@ -3,7 +3,7 @@ const anthropic = require('./anthropic')
 const { validateManifest } = require('./skillContract')
 const { supportsDeclaration } = require('./skillConnectorBroker')
 
-const EXECUTION_PROVIDERS = new Set(['mindstudio', 'mastra'])
+const EXECUTION_PROVIDERS = new Set(['mastra'])
 
 const DEFAULT_SKILL_CATALOG = []
 const MAX_SKILL_BYTES = 256 * 1024

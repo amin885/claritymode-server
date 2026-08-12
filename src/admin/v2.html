@@ -57,13 +57,10 @@
     <div class="rounded-xl border border-stone-100 bg-stone-50 p-4 space-y-3">
       <div>
         <div class="text-xs font-semibold uppercase tracking-wide text-stone-400">Skill runner</div>
-        <p class="mt-1 text-xs leading-5 text-stone-500">The workflow must implement ClarityMode Skill Contract v1 and return its manifest when described. Mastra is recommended for new Skills.</p>
+        <p class="mt-1 text-xs leading-5 text-stone-500">Enter a workflow registered in ClarityMode's managed Skill runner. It must implement ClarityMode Skill Contract v1 and return its manifest when described.</p>
       </div>
-      <div class="grid gap-3 md:grid-cols-3">
-        <select id="skill-provider" class="px-3 py-2 rounded-xl border border-stone-200 text-sm focus:outline-none focus:border-stone-400">
-          <option value="mastra">Mastra</option>
-          <option value="mindstudio">MindStudio (legacy)</option>
-        </select>
+      <input id="skill-provider" type="hidden" value="mastra" />
+      <div class="grid gap-3 md:grid-cols-2">
         <input id="skill-provider-app-id" type="text" placeholder="Workflow ID"
           class="px-3 py-2 rounded-xl border border-stone-200 text-sm focus:outline-none focus:border-stone-400" />
         <input id="skill-provider-version" type="text" placeholder="Published version (optional)"

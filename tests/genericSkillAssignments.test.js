@@ -1,5 +1,6 @@
-const assignments = require('../src/skillAssignments')
+const assignments = require('../src/skillAssignmentEngine')
 const db = require('../src/db')
+const skillRunner = require('../src/skillRunner')
 
 const manifest = {
   contractVersion: '1',
@@ -20,9 +21,9 @@ function row(overrides = {}) {
     skill_id: 'company-research',
     skill_version: '1.0.0',
     contract_version: '1',
-    provider: 'mindstudio',
-    provider_app_id: 'agent-company',
-    provider_version: 'published',
+    provider: 'mastra',
+    provider_app_id: 'company-research',
+    provider_version: '1.0.0',
     manifest,
     project_ref: { path: 'Projects/Acme', title: 'Acme' },
     project_context: { overview: 'Prepare for a sales meeting.' },
@@ -37,34 +38,28 @@ function row(overrides = {}) {
 }
 
 describe('generic durable Skill assignments', () => {
-  const previousKey = process.env.MINDSTUDIO_API_KEY
-  beforeEach(() => { process.env.MINDSTUDIO_API_KEY = 'server-key' })
   afterEach(() => jest.restoreAllMocks())
-  afterAll(() => { process.env.MINDSTUDIO_API_KEY = previousKey })
 
   test('starts a registered workflow using only the generic envelope', async () => {
-    const runAgent = jest.fn(async () => ({
-      result: JSON.stringify({
+    const invoke = jest.spyOn(skillRunner, 'invoke').mockResolvedValue({
+      result: {
+        contractVersion: '1',
         status: 'needs_input',
         stateToken: 'state-1',
         progress: { label: 'One detail is needed.' },
         inputRequest: { id: 'meetingGoal', type: 'long_text', label: 'What is the meeting goal?', required: true },
-      }),
+        connectorRequest: null, review: null, artifacts: [], error: null,
+      },
       threadId: 'thread-1',
-    }))
-    const invocation = await assignments.invokeContractAgent(row(), {}, {
-      MindStudioAgent: class { runAgent = runAgent },
-      loadSdk: async () => ({}),
     })
+    const invocation = await assignments.invokeContractAgent(row())
     expect(invocation.result.status).toBe('needs_input')
-    expect(runAgent).toHaveBeenCalledWith(expect.objectContaining({
-      appId: 'agent-company',
-      version: 'published',
-      variables: expect.objectContaining({ operation: 'start', contractVersion: '1' }),
-    }))
-    const variables = runAgent.mock.calls[0][0].variables
-    expect(JSON.parse(variables.context).userInputs).toEqual({ companyName: 'Acme' })
-    expect(JSON.stringify(variables)).not.toContain('server-key')
+    expect(invoke).toHaveBeenCalledWith(expect.objectContaining({
+      provider: 'mastra', appId: 'company-research', version: '1.0.0',
+      envelope: expect.objectContaining({ operation: 'start', contractVersion: '1' }),
+    }), {})
+    const envelope = invoke.mock.calls[0][0].envelope
+    expect(envelope.context.userInputs).toEqual({ companyName: 'Acme' })
   })
 
   test('persists a provider input request without Skill-specific parsing', async () => {

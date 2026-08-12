@@ -1,16 +1,9 @@
-jest.mock('../src/skillProvider', () => ({
-  configured: jest.fn(() => true),
-  describeSkill: jest.fn(),
-  runMindStudio: jest.fn(),
-  parseJsonValue: jest.fn(value => typeof value === 'string' ? JSON.parse(value) : value),
-}))
 jest.mock('../src/mastraSkillProvider', () => ({
   configured: jest.fn(() => true),
   describeSkill: jest.fn(),
   invoke: jest.fn(),
 }))
 
-const mindstudio = require('../src/skillProvider')
 const mastra = require('../src/mastraSkillProvider')
 const runner = require('../src/skillRunner')
 
@@ -47,11 +40,9 @@ describe('provider-neutral Skill runner', () => {
     expect(mastra.invoke).toHaveBeenCalledWith(expect.objectContaining({ envelope, idempotencyKey: 'idem-1' }), {})
   })
 
-  test('keeps the MindStudio compatibility adapter isolated behind the same contract', async () => {
-    mindstudio.runMindStudio.mockResolvedValue({ result: JSON.stringify({ contractVersion: '1', status: 'needs_input', stateToken: 'opaque', inputRequest: { id: 'answer', type: 'long_text', label: 'Answer', required: true } }), threadId: 'legacy-thread' })
-    const result = await runner.invoke({ provider: 'mindstudio', appId: 'legacy-agent', envelope, idempotencyKey: 'legacy-1' })
-    expect(result.result.status).toBe('needs_input')
-    expect(mindstudio.runMindStudio).toHaveBeenCalledWith(expect.objectContaining({ appId: 'legacy-agent' }), {})
+  test('rejects the retired MindStudio runner', async () => {
+    await expect(runner.invoke({ provider: 'mindstudio', appId: 'legacy-agent', envelope, idempotencyKey: 'legacy-1' }))
+      .rejects.toMatchObject({ status: 400 })
   })
 
   test('rejects unknown execution providers', async () => {

@@ -1,7 +1,7 @@
 const express = require('express')
 const db = require('../db')
 const requireAuth = require('../middleware/requireAuth')
-const assignments = require('../skillAssignments')
+const assignments = require('../skillAssignmentEngine')
 const credentials = require('../skillCredentials')
 const vidiq = require('../vidiqConnector')
 const { getConnector, publicConnectors } = require('../skillConnectors')
