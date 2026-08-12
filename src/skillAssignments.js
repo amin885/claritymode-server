@@ -1098,9 +1098,9 @@ async function claimNext() {
          LEFT JOIN skill_user_profiles p ON p.user_id = a.user_id AND p.skill_id = a.skill_id
         WHERE a.status = 'queued'
            OR (a.status = 'working' AND a.run_started_at < now() - interval '10 minutes')
-        ORDER BY a.updated_at ASC
-        LIMIT 1
-        FOR UPDATE SKIP LOCKED`,
+       ORDER BY a.updated_at ASC
+       LIMIT 1
+       FOR UPDATE OF a SKIP LOCKED`,
     )
     const row = result.rows[0]
     if (!row) {
@@ -1167,9 +1167,12 @@ async function workOnce(deps = {}) {
 
 function start() {
   if (timer) return
-  timer = setInterval(() => workOnce().catch(() => {}), 3_000)
+  const reportWorkerError = error => console.error('[skill-assignments] Worker loop failed', {
+    error: String(error?.message || error || 'Unknown worker error').slice(0, 2_000),
+  })
+  timer = setInterval(() => workOnce().catch(reportWorkerError), 3_000)
   timer.unref?.()
-  workOnce().catch(() => {})
+  workOnce().catch(reportWorkerError)
 }
 
 function stop() {
@@ -1185,6 +1188,7 @@ module.exports = {
   configured,
   assignmentFailure,
   buildVidIQTopicPivot,
+  claimNext,
   evaluateTopicCandidates,
   enforceYouTubeInterviewGate,
   enforceYouTubeVidIQGate,

@@ -97,4 +97,22 @@ describe('generic durable Skill assignments', () => {
     }, 'thread-1')
     expect(query.mock.calls[0][1][1]).toBe('ready_for_review')
   })
+
+  test('claims only the assignment row when optional profile data is left joined', async () => {
+    const client = {
+      query: jest.fn()
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [] }),
+      release: jest.fn(),
+    }
+    jest.spyOn(db, 'connect').mockResolvedValue(client)
+
+    await expect(assignments.claimNext()).resolves.toBeNull()
+
+    expect(client.query.mock.calls[1][0]).toContain('LEFT JOIN skill_user_profiles')
+    expect(client.query.mock.calls[1][0]).toContain('FOR UPDATE OF a SKIP LOCKED')
+    expect(client.query.mock.calls[1][0]).not.toMatch(/FOR UPDATE SKIP LOCKED/)
+    expect(client.release).toHaveBeenCalled()
+  })
 })
