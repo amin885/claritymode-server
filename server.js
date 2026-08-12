@@ -26,7 +26,7 @@ if (require.main === module) {
   const db = require('./src/db')
   const { runMigrations } = require('./src/migrations')
   const sharedProjectEvents = require('./src/sharedProjectEvents')
-  const skillAssignments = require('./src/skillAssignments')
+  const skillAssignments = require('./src/skillAssignmentEngine')
   const connString = process.env.POSTGRES_URL || process.env.DATABASE_URL
   console.log('DB connection string set:', !!connString, connString?.slice(0, 20))
   runMigrations(db)
