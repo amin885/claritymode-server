@@ -59,6 +59,7 @@ function publicAssignment(row) {
     approval: row.approval,
     question: row.question,
     artifacts: Array.isArray(row.artifacts) ? row.artifacts : [],
+    taskProposals: Array.isArray(row.workflow_state?.taskProposals) ? row.workflow_state.taskProposals : [],
     error: row.public_error,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -105,6 +106,7 @@ async function invokeContractAgent(row, { humanResponse = {}, connectorResult = 
       projectContext: row.project_context || {},
       userProfile: row.skill_profile || {},
       userInputs: row.brief || {},
+      currentUser: { name: row.user_name || '', email: row.user_email || '' },
     },
     stateToken: stateToken(row),
     response: humanResponse || {},
@@ -152,7 +154,7 @@ async function persistContractResult(row, result, providerThreadId, connectorEvi
     [
       row.id, status === 'working' ? 'queued' : status, result.status,
       String(result.progress?.label || 'ClarityMode is working...').slice(0, 500),
-      { contractVersion: '1', stateToken: result.stateToken || '', progress: result.progress || {} }, result.connectorRequest,
+      { contractVersion: '1', stateToken: result.stateToken || '', progress: result.progress || {}, taskProposals: result.taskProposals || [] }, result.connectorRequest,
       approval, question, JSON.stringify(artifacts), result.error, providerThreadId, connectorEvidence,
     ],
   )
@@ -206,9 +208,11 @@ async function claimNext() {
     await client.query('BEGIN')
     const result = await client.query(
       `SELECT a.*, s.contract_version, s.provider, s.provider_app_id, s.provider_version, s.manifest,
+              u.name AS user_name, u.email AS user_email,
               COALESCE(p.profile, '{}'::jsonb) AS skill_profile
          FROM skill_assignments a
          JOIN v2_skills s ON s.id = a.skill_id
+         JOIN users u ON u.id = a.user_id
          LEFT JOIN skill_user_profiles p ON p.user_id = a.user_id AND p.skill_id = a.skill_id
         WHERE (a.status = 'queued' OR (a.status = 'working' AND a.run_started_at < now() - interval '10 minutes'))
           AND s.status = 'active' AND s.contract_version = '1'

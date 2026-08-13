@@ -119,6 +119,7 @@ function validateManifest(value, expectedSkillId = '') {
     outputs,
     connectors: normalizeConnectors(value.connectors),
     workPlan: normalizeWorkPlan(value.workPlan),
+    taskProposals: { enabled: Boolean(value.taskProposals?.enabled) },
     completion: {
       requiresAcceptance: completion.requiresAcceptance !== false,
       completeSourceTaskOnAcceptance: Boolean(completion.completeSourceTaskOnAcceptance),
@@ -222,6 +223,7 @@ function validateProviderResponse(value) {
     connectorRequest: null,
     review: null,
     artifacts: Array.isArray(value.artifacts) ? value.artifacts.slice(0, 40) : [],
+    taskProposals: [],
     error: null,
   }
   if (status === 'needs_input') {
@@ -244,6 +246,18 @@ function validateProviderResponse(value) {
       message: text(review.message, 2000),
       allowRequestChanges: review.allowRequestChanges !== false,
     }
+  }
+  if (value.taskProposals !== undefined) {
+    if (!Array.isArray(value.taskProposals) || value.taskProposals.length > 100) throw contractError('The Skill returned invalid task proposals.')
+    result.taskProposals = value.taskProposals.map((proposal, index) => {
+      const title = text(proposal?.title || proposal?.task, 500)
+      if (!title) throw contractError(`Task proposal ${index + 1} needs a title.`)
+      return {
+        id: text(proposal?.id || `proposal-${index + 1}`, 120), title,
+        details: text(proposal?.details, 20_000), owner: text(proposal?.owner, 500),
+        dueDate: text(proposal?.dueDate, 40), suggestedForUser: Boolean(proposal?.suggestedForUser),
+      }
+    })
   }
   if (status === 'failed') {
     const error = value.error && typeof value.error === 'object' ? value.error : {}

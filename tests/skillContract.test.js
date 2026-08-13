@@ -71,6 +71,18 @@ describe('ClarityMode Skill Contract v1', () => {
     })).toMatchObject({ status: 'ready_for_review', review: { title: 'Review the brief', allowRequestChanges: true } })
   })
 
+  test('normalizes editable task proposals without trusting provider payloads', () => {
+    const result = validateProviderResponse({
+      status: 'ready_for_review',
+      review: { title: 'Review the summary' },
+      taskProposals: [{ task: 'Send the recap', details: 'Include decisions.', owner: 'Amin', dueDate: '2026-08-14', suggestedForUser: true }],
+    })
+    expect(result.taskProposals).toEqual([{
+      id: 'proposal-1', title: 'Send the recap', details: 'Include decisions.', owner: 'Amin', dueDate: '2026-08-14', suggestedForUser: true,
+    }])
+    expect(() => validateProviderResponse({ status: 'ready_for_review', taskProposals: [{ owner: 'Amin' }] })).toThrow(/needs a title/i)
+  })
+
   test('requires structured connector requests', () => {
     expect(() => validateProviderResponse({ status: 'needs_connector' })).toThrow(/connector request/i)
     expect(validateProviderResponse({

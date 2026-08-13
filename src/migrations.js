@@ -452,6 +452,7 @@ $skill$,
              { id: 'focus', type: 'long_text', label: 'Anything to emphasize?', required: false, description: 'Optional priorities, decisions, or follow-ups to pay special attention to.' },
            ],
            outputs: [{ id: 'summary', type: 'markdown', label: 'Meeting summary', required: true }],
+           taskProposals: { enabled: true },
            connectors: [],
            workPlan: [
              { id: 'review-transcript', label: 'Review the transcript', owner: 'claritymode' },
