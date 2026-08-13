@@ -7,6 +7,7 @@ const RESPONSE_STATUSES = new Set(['working', 'needs_input', 'needs_connector', 
 const MAX_ARTIFACTS = 40
 const MAX_ARTIFACT_TEXT = 500_000
 const WORK_PLAN_OWNERS = new Set(['claritymode', 'user'])
+const ARTIFACT_PLACEMENTS = new Set(['project_deliverables', 'work_area'])
 
 function contractError(message) {
   return Object.assign(new Error(message), { status: 400 })
@@ -95,6 +96,16 @@ function normalizeWorkPlan(workPlan) {
   })
 }
 
+function normalizeArtifactPresentation(value) {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+  const placement = text(source.placement || 'project_deliverables', 40)
+  if (!ARTIFACT_PLACEMENTS.has(placement)) throw contractError('The Skill has an unsupported artifact placement.')
+  return {
+    placement,
+    label: text(source.label || 'Deliverable', 120),
+  }
+}
+
 function validateManifest(value, expectedSkillId = '') {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw contractError('A Skill manifest is required.')
   const contractVersion = text(value.contractVersion, 20)
@@ -120,6 +131,7 @@ function validateManifest(value, expectedSkillId = '') {
     connectors: normalizeConnectors(value.connectors),
     workPlan: normalizeWorkPlan(value.workPlan),
     taskProposals: { enabled: Boolean(value.taskProposals?.enabled) },
+    artifactPresentation: normalizeArtifactPresentation(value.artifactPresentation),
     completion: {
       requiresAcceptance: completion.requiresAcceptance !== false,
       completeSourceTaskOnAcceptance: Boolean(completion.completeSourceTaskOnAcceptance),

@@ -45,6 +45,18 @@ describe('ClarityMode Skill Contract v1', () => {
     }).progress).toEqual({ label: 'Researching', currentStepId: 'research', completedStepIds: [] })
   })
 
+  test('normalizes where a Skill presents its accepted artifact', () => {
+    expect(validateManifest({
+      ...manifest,
+      artifactPresentation: { placement: 'work_area', label: 'Meeting summary' },
+    }).artifactPresentation).toEqual({ placement: 'work_area', label: 'Meeting summary' })
+    expect(validateManifest(manifest).artifactPresentation).toEqual({ placement: 'project_deliverables', label: 'Deliverable' })
+    expect(() => validateManifest({
+      ...manifest,
+      artifactPresentation: { placement: 'sidebar', label: 'Summary' },
+    })).toThrow(/unsupported artifact placement/i)
+  })
+
   test('rejects mismatched ids and unsupported field types', () => {
     expect(() => validateManifest(manifest, 'different-skill')).toThrow(/does not match/i)
     expect(() => validateManifest({ ...manifest, inputs: [{ id: 'file', type: 'password', label: 'Secret' }] })).toThrow(/unsupported/i)

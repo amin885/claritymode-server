@@ -437,7 +437,7 @@ $skill$,
          'Meeting Summary',
          'Turn a meeting transcript into a clear summary, decisions, follow-ups, and open questions.',
          '1.0.0', '', 'mastra',
-         '# Meeting Summary\n\nA reusable ClarityMode Skill that turns a pasted meeting transcript into a grounded, reviewable summary. The existing Meeting Notes feature remains unchanged.',
+         '# Meeting Summary\n\nA reusable ClarityMode Skill that turns a pasted meeting transcript into a grounded, reviewable summary inside its ClarityMode Work Area.',
          'Prepare a grounded meeting summary with decisions, follow-ups, and open questions.',
          'active', '1', 'mastra', 'meeting-summary', '1.0.0',
          '${JSON.stringify({
@@ -452,6 +452,7 @@ $skill$,
              { id: 'focus', type: 'long_text', label: 'Anything to emphasize?', required: false, description: 'Optional priorities, decisions, or follow-ups to pay special attention to.' },
            ],
            outputs: [{ id: 'summary', type: 'markdown', label: 'Meeting summary', required: true }],
+           artifactPresentation: { placement: 'work_area', label: 'Meeting summary' },
            taskProposals: { enabled: true },
            connectors: [],
            workPlan: [
@@ -478,6 +479,17 @@ $skill$,
          provider_version = EXCLUDED.provider_version,
          manifest = EXCLUDED.manifest,
          updated_at = now()` ,
+    ],
+  },
+  {
+    version: 18,
+    name: 'meeting-summary-work-area-artifact',
+    statements: [
+      `UPDATE v2_skills
+          SET content = '# Meeting Summary\n\nA reusable ClarityMode Skill that turns a pasted meeting transcript into a grounded, reviewable summary inside its ClarityMode Work Area.',
+              manifest = jsonb_set(manifest, '{artifactPresentation}', '{"placement":"work_area","label":"Meeting summary"}'::jsonb, true),
+              updated_at = now()
+        WHERE id = 'meeting-summary'`,
     ],
   },
 ]
