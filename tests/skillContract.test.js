@@ -33,6 +33,11 @@ describe('ClarityMode Skill Contract v1', () => {
     ])
   })
 
+  test('preserves a reusable profile source for related Skills', () => {
+    const result = validateManifest({ ...manifest, profileSourceSkillId: 'claritymode-youtube-script-producer' })
+    expect(result.profileSourceSkillId).toBe('claritymode-youtube-script-producer')
+  })
+
   test('normalizes manifest-defined work plans and structured progress', () => {
     const workPlan = [
       { id: 'research', label: 'Research the company', owner: 'claritymode' },

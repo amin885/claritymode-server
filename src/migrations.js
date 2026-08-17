@@ -492,6 +492,63 @@ $skill$,
         WHERE id = 'meeting-summary'`,
     ],
   },
+  {
+    version: 19,
+    name: 'youtube-playlist-builder-skill',
+    statements: [
+      `INSERT INTO v2_skills (
+         id, name, description, version, source_url, data_source, content, summary, status,
+         contract_version, provider, provider_app_id, provider_version, manifest, updated_at
+       ) VALUES (
+         'youtube-playlist-builder',
+         'Bingeable Playlist Builder',
+         'Build a coherent 5–8 video YouTube playlist from verified breakout patterns and your channel strategy.',
+         '1.0.0', '', 'mastra',
+         '# Bingeable Playlist Builder\n\nResearch related breakout patterns, map a viewer journey, and create five to eight connected video briefs with bullet outlines.',
+         'Create an evidence-informed, bingeable YouTube playlist with 5–8 distinct video briefs.',
+         'active', '1', 'mastra', 'youtube-playlist-builder', '1.0.0',
+         '${JSON.stringify({
+           contractVersion: '1',
+           skillId: 'youtube-playlist-builder',
+           skillVersion: '1.0.0',
+           name: 'Bingeable Playlist Builder',
+           description: 'Build a coherent 5–8 video YouTube playlist from verified breakout patterns and your channel strategy.',
+           profileSourceSkillId: 'claritymode-youtube-script-producer',
+           inputs: [
+             { id: 'startMode', type: 'select', label: 'How should ClarityMode begin?', required: true, options: [
+               { value: 'use_theme', label: 'Use my theme' },
+               { value: 'suggest', label: 'Suggest the playlist direction' },
+             ] },
+             { id: 'topic', type: 'text', label: 'Broad theme or seed idea', required: false, description: 'A topic you want to build around, or a useful hint for topic suggestions.' },
+             { id: 'creatorContext', type: 'long_text', label: 'What should ClarityMode know?', required: false, description: 'Your opinions, experience, audience needs, stories, or boundaries for this playlist.' },
+           ],
+           outputs: [{ id: 'playlist', type: 'markdown', label: 'YouTube playlist plan', required: true }],
+           connectors: [{ connector: 'vidiq', operations: ['research_topics'] }],
+           artifactPresentation: { placement: 'work_area', label: 'Playlist plan' },
+           workPlan: [
+             { id: 'plan-research', label: 'Define the playlist opportunity', owner: 'claritymode' },
+             { id: 'research-patterns', label: 'Research breakout patterns with VidIQ', owner: 'claritymode' },
+             { id: 'design-journey', label: 'Map the viewer journey', owner: 'claritymode' },
+             { id: 'build-briefs', label: 'Create 5–8 video briefs and outlines', owner: 'claritymode' },
+             { id: 'quality-check', label: 'Check sequence, overlap, and evidence', owner: 'claritymode' },
+             { id: 'review-playlist', label: 'Review and accept the playlist plan', owner: 'user' },
+           ],
+           completion: { requiresAcceptance: true, completeSourceTaskOnAcceptance: false, completeWorkAreaOnAcceptance: false },
+         }).replace(/'/g, "''")}'::jsonb,
+         now()
+       )
+       ON CONFLICT (id) DO UPDATE SET
+         name = EXCLUDED.name, description = EXCLUDED.description, version = EXCLUDED.version,
+         data_source = EXCLUDED.data_source, content = EXCLUDED.content, summary = EXCLUDED.summary,
+         status = 'active', contract_version = EXCLUDED.contract_version, provider = EXCLUDED.provider,
+         provider_app_id = EXCLUDED.provider_app_id, provider_version = EXCLUDED.provider_version,
+         manifest = EXCLUDED.manifest, updated_at = now()`,
+      `UPDATE users
+          SET enabled_v2_skills = array_append(enabled_v2_skills, 'youtube-playlist-builder')
+        WHERE 'claritymode-youtube-script-producer' = ANY(enabled_v2_skills)
+          AND NOT ('youtube-playlist-builder' = ANY(enabled_v2_skills))`,
+    ],
+  },
 ]
 
 async function runMigrations(db) {

@@ -126,6 +126,7 @@ function validateManifest(value, expectedSkillId = '') {
     skillVersion,
     name,
     description: text(value.description, 1000),
+    profileSourceSkillId: value.profileSourceSkillId ? identifier(value.profileSourceSkillId, 'Profile source Skill id') : '',
     inputs: normalizeFields(value.inputs, 'Input'),
     outputs,
     connectors: normalizeConnectors(value.connectors),

@@ -200,20 +200,27 @@ router.post('/', async (req, res) => {
     )
     const skill = skillResult.rows[0]
     if (!skill) return res.status(404).json({ error: 'That ClarityMode Skill is not available.' })
+    let workflowState = {}
     if (String(skill.contract_version || '') === '1') {
       const manifest = validateManifest(skill.manifest, input.skillId)
       input.brief = validateAssignmentInputs(manifest, input.brief)
       input.skillVersion = manifest.skillVersion
+      workflowState = {
+        contractVersion: '1',
+        skillVersion: manifest.skillVersion,
+        workPlan: Array.isArray(manifest.workPlan) ? manifest.workPlan : [],
+        manifest,
+      }
     } else {
       input.skillVersion = String(skill.version || input.skillVersion)
     }
     const result = await db.query(
       `INSERT INTO skill_assignments (
-        id, user_id, skill_id, skill_version, client_request_id, project_ref, source_task, brief, project_context
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+        id, user_id, skill_id, skill_version, client_request_id, project_ref, source_task, brief, project_context, workflow_state
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
       ON CONFLICT (user_id, client_request_id) DO UPDATE SET updated_at = skill_assignments.updated_at
       RETURNING *`,
-      [input.id, req.user.sub, input.skillId, input.skillVersion, input.clientRequestId, input.projectRef, input.sourceTask, input.brief, input.projectContext],
+      [input.id, req.user.sub, input.skillId, input.skillVersion, input.clientRequestId, input.projectRef, input.sourceTask, input.brief, input.projectContext, workflowState],
     )
     assignments.workOnce().catch(() => {})
     res.status(202).json({ ok: true, assignment: assignments.publicAssignment(result.rows[0]) })
@@ -276,13 +283,24 @@ router.post('/:id/respond', async (req, res) => {
 })
 
 router.post('/:id/accept', async (req, res) => {
+  const acceptedTaskProposals = Array.isArray(req.body?.acceptedTaskProposals)
+    ? req.body.acceptedTaskProposals.slice(0, 100).map((proposal, index) => ({
+      id: String(proposal?.id || `proposal-${index + 1}`).trim().slice(0, 120),
+      title: String(proposal?.title || '').trim().slice(0, 500),
+      details: String(proposal?.details || '').trim().slice(0, 20000),
+      owner: String(proposal?.owner || '').trim().slice(0, 500),
+      dueDate: String(proposal?.dueDate || '').trim().slice(0, 40),
+    })).filter(proposal => proposal.title)
+    : []
   const result = await db.query(
     `UPDATE skill_assignments
         SET status = 'queued', stage = 'accepting', progress_label = 'Finishing this assignment...',
-            pending_response = jsonb_build_object('kind', 'accept'), updated_at = now()
+            pending_response = jsonb_build_object('kind', 'accept'),
+            workflow_state = jsonb_set(COALESCE(workflow_state, '{}'::jsonb), '{acceptedTaskProposals}', $3::jsonb, true),
+            updated_at = now()
       WHERE id = $1 AND user_id = $2 AND status = 'ready_for_review'
       RETURNING *`,
-    [req.params.id, req.user.sub],
+    [req.params.id, req.user.sub, JSON.stringify(acceptedTaskProposals)],
   )
   if (!result.rows[0]) return res.status(409).json({ error: 'This assignment is not ready to accept.' })
   assignments.workOnce().catch(() => {})
@@ -290,28 +308,24 @@ router.post('/:id/accept', async (req, res) => {
 })
 
 router.post('/:id/cancel', async (req, res) => {
-  const immediate = await db.query(
+  const result = await db.query(
     `UPDATE skill_assignments
         SET status = 'cancelled', stage = 'cancelled', progress_label = 'Cancelled',
             pending_response = NULL, run_started_at = NULL, updated_at = now()
       WHERE id = $1 AND user_id = $2 AND status NOT IN ('accepted', 'cancelled')
-        AND COALESCE(workflow_state->>'stateToken', '') = ''
       RETURNING *`,
     [req.params.id, req.user.sub],
   )
-  if (immediate.rows[0]) return res.json({ ok: true, assignment: assignments.publicAssignment(immediate.rows[0]) })
-  const queued = await db.query(
-    `UPDATE skill_assignments
-        SET status = 'queued', stage = 'cancelling', progress_label = 'Cancelling this assignment...',
-            pending_response = jsonb_build_object('kind', 'cancel'), updated_at = now()
-      WHERE id = $1 AND user_id = $2 AND status NOT IN ('accepted', 'cancelled')
-        AND COALESCE(workflow_state->>'stateToken', '') <> ''
-      RETURNING *`,
-    [req.params.id, req.user.sub],
-  )
-  if (!queued.rows[0]) return res.status(409).json({ error: 'This assignment cannot be cancelled.' })
-  assignments.workOnce().catch(() => {})
-  res.status(202).json({ ok: true, assignment: assignments.publicAssignment(queued.rows[0]) })
+  if (!result.rows[0]) return res.status(409).json({ error: 'This assignment cannot be cancelled.' })
+  // Cancellation is final in ClarityMode immediately. The runner cleanup is
+  // best-effort and cannot make a late result visible again.
+  assignments.cancelRunnerState(req.params.id, req.user.sub).catch(error => {
+    console.error('[skill-assignments] Runner cancellation cleanup failed', {
+      assignmentId: req.params.id,
+      error: String(error?.message || error || 'Unknown cancellation error').slice(0, 500),
+    })
+  })
+  res.json({ ok: true, assignment: assignments.publicAssignment(result.rows[0]) })
 })
 
 module.exports = router
