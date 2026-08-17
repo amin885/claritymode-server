@@ -160,6 +160,19 @@ function contentValue(result) {
   try { return JSON.parse(text) } catch { return text }
 }
 
+function toolError(result, fallback) {
+  const value = contentValue(result)
+  const message = typeof value === 'string'
+    ? value
+    : String(value?.message || value?.error || fallback)
+  const error = new Error(message || fallback)
+  if (/not enough credits|credits? remaining|credit balance|insufficient credits?/i.test(message)) {
+    error.code = 'VIDIQ_CREDITS_EXHAUSTED'
+    error.status = 402
+  }
+  return error
+}
+
 function normalizeChannels(value) {
   const found = []
   const visit = current => {
@@ -278,7 +291,7 @@ async function research(apiKey, queries, fetchImpl = fetch) {
       method: 'tools/call',
       params: { name: outliers.name, arguments: argumentsFor(outliers, query) },
     })
-    if (outlierResponse.body?.result?.isError) throw new Error(String(contentValue(outlierResponse.body.result) || 'VidIQ outlier research failed.'))
+    if (outlierResponse.body?.result?.isError) throw toolError(outlierResponse.body.result, 'VidIQ outlier research failed.')
     const keywordResponse = await rpc({
       apiKey,
       fetchImpl,
@@ -287,7 +300,7 @@ async function research(apiKey, queries, fetchImpl = fetch) {
       method: 'tools/call',
       params: { name: keyword.name, arguments: argumentsFor(keyword, query) },
     })
-    if (keywordResponse.body?.result?.isError) throw new Error(String(contentValue(keywordResponse.body.result) || 'VidIQ keyword research failed.'))
+    if (keywordResponse.body?.result?.isError) throw toolError(keywordResponse.body.result, 'VidIQ keyword research failed.')
     results.push({
       query,
       tools: { outliers: outliers.name, keyword: keyword.name },

@@ -40,6 +40,18 @@ function row(overrides = {}) {
 describe('generic durable Skill assignments', () => {
   afterEach(() => jest.restoreAllMocks())
 
+  test('turns exhausted VidIQ credits into clear recovery guidance', () => {
+    const failure = assignments.assignmentFailure(Object.assign(
+      new Error('Not enough credits. This tool costs 5 credits. No credits were charged.'),
+      { code: 'VIDIQ_CREDITS_EXHAUSTED', status: 402 },
+    ))
+    expect(failure.public).toEqual({
+      code: 'connector_credits_exhausted',
+      message: 'Your connected VidIQ account has no credits remaining. Add VidIQ credits, then try again.',
+    })
+    expect(failure.retry).toBe(false)
+  })
+
   test('starts a registered workflow using only the generic envelope', async () => {
     const invoke = jest.spyOn(skillRunner, 'invoke').mockResolvedValue({
       result: {

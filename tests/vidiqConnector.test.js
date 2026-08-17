@@ -170,4 +170,32 @@ describe('VidIQ connected channel discovery', () => {
     expect(result.map(item => item.query)).toEqual(queries.slice(0, 6))
     expect(fetchImpl).toHaveBeenCalledTimes(15)
   })
+
+  test('identifies exhausted VidIQ credits as an actionable connector error', async () => {
+    const responses = [
+      { body: { jsonrpc: '2.0', id: 1, result: {} }, sessionId: 'session-1' },
+      { notification: true },
+      { body: { jsonrpc: '2.0', id: 2, result: { tools: [
+        { name: 'vidiq_outliers', inputSchema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] } },
+        { name: 'vidiq_keyword_research', inputSchema: { type: 'object', properties: { keyword: { type: 'string' } }, required: ['keyword'] } },
+      ] } } },
+      { body: { jsonrpc: '2.0', id: 3, result: { isError: true, content: [
+        { type: 'text', text: 'Not enough credits. This tool costs 5 credits. No credits were charged.' },
+      ] } } },
+    ]
+    const fetchImpl = jest.fn(async (_url, options) => {
+      const next = responses.shift()
+      if (next.notification) return { ok: true }
+      return {
+        ok: true,
+        headers: { get: name => name.toLowerCase() === 'mcp-session-id' ? (next.sessionId || '') : '' },
+        text: async () => JSON.stringify(next.body),
+      }
+    })
+
+    await expect(vidiq.research('private-key', ['energy management'], fetchImpl)).rejects.toMatchObject({
+      code: 'VIDIQ_CREDITS_EXHAUSTED',
+      status: 402,
+    })
+  })
 })

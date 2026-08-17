@@ -27,6 +27,9 @@ function assignmentFailure(error, row = {}) {
   const unavailable = normalized.includes('401') || normalized.includes('403')
     || normalized.includes('unauthorized') || normalized.includes('forbidden')
     || normalized.includes('quota') || normalized.includes('insufficient credit')
+  const connectorCreditsExhausted = normalized.includes('vidiq_credits_exhausted')
+    || normalized.includes('not enough credits') || normalized.includes('credits remaining')
+    || normalized.includes('credit balance')
   const attempt = Number(row.attempt_count || 0) + 1
   return {
     transient,
@@ -36,7 +39,9 @@ function assignmentFailure(error, row = {}) {
       name: String(error?.name || 'Error').slice(0, 120), code: code || null, message,
       stage: String(row.stage || '').slice(0, 120) || null, attempt, recordedAt: new Date().toISOString(),
     },
-    public: unavailable
+    public: connectorCreditsExhausted
+      ? { code: 'connector_credits_exhausted', message: 'Your connected VidIQ account has no credits remaining. Add VidIQ credits, then try again.' }
+      : unavailable
       ? { code: 'skill_service_unavailable', message: 'This ClarityMode Skill needs service attention. Your work was preserved.' }
       : transient
         ? { code: 'temporary_failure', message: 'The Skill service was temporarily unavailable. Your work was preserved; try again.' }
