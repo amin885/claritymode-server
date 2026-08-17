@@ -266,7 +266,14 @@ async function workOnce(deps = {}) {
       await processContractAssignment(row, deps)
     } catch (error) {
       const failure = assignmentFailure(error, row)
-      console.error('[skill-assignments] Assignment failed', { assignmentId: row.id, attempt: failure.attempt, retrying: failure.retry, error: failure.internal.message })
+      console.error('[skill-assignments] Assignment failed', JSON.stringify({
+        assignmentId: row.id,
+        attempt: failure.attempt,
+        retrying: failure.retry,
+        stage: failure.internal.stage,
+        code: failure.internal.code,
+        error: failure.internal.message,
+      }))
       if (failure.retry) {
         await db.query(
           `UPDATE skill_assignments SET status = 'queued', progress_label = 'The Skill service paused; retrying safely...',
