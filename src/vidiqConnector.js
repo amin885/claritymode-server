@@ -260,7 +260,7 @@ async function validate(apiKey, fetchImpl = fetch) {
 }
 
 async function research(apiKey, queries, fetchImpl = fetch) {
-  const cleanQueries = [...new Set((Array.isArray(queries) ? queries : []).map(value => String(value || '').trim()).filter(Boolean))].slice(0, 3)
+  const cleanQueries = [...new Set((Array.isArray(queries) ? queries : []).map(value => String(value || '').trim()).filter(Boolean))].slice(0, 6)
   if (!cleanQueries.length) throw new Error('No VidIQ research queries were provided.')
   const session = await openSession(apiKey, fetchImpl)
   const keyword = keywordTool(session.tools)

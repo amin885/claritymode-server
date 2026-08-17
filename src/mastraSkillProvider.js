@@ -1,4 +1,8 @@
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+// A runner invocation may include one structured model generation. The runner's
+// OpenAI client allows one retry with a 120-second attempt timeout, so this
+// boundary must outlive both attempts instead of abandoning valid work halfway.
+const RUNNER_REQUEST_TIMEOUT_MS = 5 * 60_000
 
 function configured() {
   return Boolean(String(process.env.MASTRA_SKILL_RUNNER_URL || '').trim()
@@ -20,7 +24,7 @@ function secret() {
 async function request(path, body, deps = {}) {
   const fetchImpl = deps.fetchImpl || fetch
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), Number(deps.timeoutMs) || 120_000)
+  const timeout = setTimeout(() => controller.abort(), Number(deps.timeoutMs) || RUNNER_REQUEST_TIMEOUT_MS)
   try {
     const response = await fetchImpl(`${baseUrl()}${path}`, {
       method: 'POST',
@@ -67,4 +71,4 @@ async function invoke({ appId, version = '', envelope, idempotencyKey }, deps = 
   return { result: result.result || result, threadId: String(result.runId || result.threadId || '') }
 }
 
-module.exports = { configured, describeSkill, invoke, request }
+module.exports = { RUNNER_REQUEST_TIMEOUT_MS, configured, describeSkill, invoke, request }

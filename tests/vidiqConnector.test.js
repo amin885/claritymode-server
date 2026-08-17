@@ -140,4 +140,34 @@ describe('VidIQ connected channel discovery', () => {
     }])
     expect(calls.slice(-2).map(call => call.params.name)).toEqual(['vidiq_outliers', 'vidiq_keyword_research'])
   })
+
+  test('executes the complete six-query playlist research plan without silently dropping later directions', async () => {
+    const queries = ['one', 'two', 'three', 'four', 'five', 'six', 'seven']
+    const responses = [
+      { body: { jsonrpc: '2.0', id: 1, result: {} }, sessionId: 'session-1' },
+      { notification: true },
+      { body: { jsonrpc: '2.0', id: 2, result: { tools: [
+        { name: 'vidiq_outliers', inputSchema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] } },
+        { name: 'vidiq_keyword_research', inputSchema: { type: 'object', properties: { keyword: { type: 'string' } }, required: ['keyword'] } },
+      ] } } },
+      ...queries.slice(0, 6).flatMap((query, index) => [
+        { body: { jsonrpc: '2.0', id: (index * 2) + 3, result: { content: [{ type: 'text', text: JSON.stringify({ videos: [{ id: `video-${index}`, title: query, outlierScore: index + 1 }] }) }] } } },
+        { body: { jsonrpc: '2.0', id: (index * 2) + 4, result: { content: [{ type: 'text', text: JSON.stringify({ volume: index + 100 }) }] } } },
+      ]),
+    ]
+    const fetchImpl = jest.fn(async (_url, options) => {
+      const next = responses.shift()
+      if (next.notification) return { ok: true }
+      return {
+        ok: true,
+        headers: { get: name => name.toLowerCase() === 'mcp-session-id' ? (next.sessionId || '') : '' },
+        text: async () => JSON.stringify(next.body),
+      }
+    })
+
+    const result = await vidiq.research('private-key', queries, fetchImpl)
+
+    expect(result.map(item => item.query)).toEqual(queries.slice(0, 6))
+    expect(fetchImpl).toHaveBeenCalledTimes(15)
+  })
 })

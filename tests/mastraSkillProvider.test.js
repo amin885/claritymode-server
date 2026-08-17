@@ -33,4 +33,20 @@ describe('private Mastra runner boundary', () => {
     const fetchImpl = jest.fn(async () => response({ error: 'Runner unavailable' }, 503))
     await expect(provider.describeSkill({ appId: 'youtube-outline' }, { fetchImpl })).rejects.toMatchObject({ status: 503 })
   })
+
+  test('allows a long structured generation to finish beyond the old two-minute cutoff', async () => {
+    jest.useFakeTimers()
+    try {
+      const fetchImpl = jest.fn((_url, options) => new Promise((resolve, reject) => {
+        options.signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })))
+        setTimeout(() => resolve(response({ manifest: { id: 'youtube-playlist' } })), 150_000)
+      }))
+      const pending = provider.describeSkill({ appId: 'youtube-playlist' }, { fetchImpl })
+      await jest.advanceTimersByTimeAsync(150_000)
+      await expect(pending).resolves.toEqual({ id: 'youtube-playlist' })
+      expect(provider.RUNNER_REQUEST_TIMEOUT_MS).toBeGreaterThan(150_000)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
 })
