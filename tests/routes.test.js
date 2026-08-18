@@ -151,6 +151,30 @@ describe('ClarityMode Skill assignment entitlement boundary', () => {
     expect(db.query.mock.calls.at(-1)[0]).toContain("pending_response")
     expect(db.query.mock.calls.at(-1)[0]).toContain("'retry'")
   })
+
+  test('normalizes the existing retry button response to the runner retry contract', async () => {
+    mockApprovedUser()
+    db.query.mockResolvedValueOnce({
+      rows: [{
+        id: '11111111-1111-4111-8111-111111111111',
+        user_id: 'user-1',
+        status: 'queued',
+        pending_response: { kind: 'retry' },
+        artifacts: [],
+      }],
+    })
+
+    const res = await request(app)
+      .post('/v2/skill-assignments/11111111-1111-4111-8111-111111111111/respond')
+      .set('authorization', `Bearer ${makeToken()}`)
+      .send({ response: { retry: true } })
+
+    expect(res.status).toBe(202)
+    const [query, params] = db.query.mock.calls.at(-1)
+    expect(query).toContain("status = 'failed'")
+    expect(query).toContain("jsonb_build_object('kind', 'retry')")
+    expect(params[2]).toEqual({ retry: true })
+  })
 })
 
 describe('GET /auth/admin/users', () => {

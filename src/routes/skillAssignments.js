@@ -265,7 +265,7 @@ router.post('/:id/respond', async (req, res) => {
               END,
               pending_response = CASE
                 WHEN status = 'failed' AND COALESCE(($3::jsonb->>'retry')::boolean, false)
-                  THEN COALESCE(pending_response, $3::jsonb)
+                  THEN jsonb_build_object('kind', 'retry')
                 ELSE $3::jsonb
               END,
               approval = NULL, question = NULL,
